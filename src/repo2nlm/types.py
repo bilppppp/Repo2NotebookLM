@@ -14,6 +14,7 @@ class FileRecord:
     text: bool
     truncated: bool
     content: str
+    commit: str | None = None
 
 
 @dataclass(slots=True)

@@ -6,7 +6,7 @@
 
 Convert Git repositories into structured knowledge bases tailored for Gemini Notebook (formerly NotebookLM).
 
-> **Current Version**: `v0.2.0`
+> **Current Version**: `v0.3.0`
 
 ---
 
@@ -27,6 +27,15 @@ Repo2NotebookLM bridges **Git Repo → Structured Sources → Gemini Notebook �
 - **True Incremental Sync**: Compares SHA256 hashes against prior state; unchanged sources incur zero re-uploads.
 - **Ownership Guard**: Whitelist protection ensures manually added user notes and collision files are never deleted.
 - **Multi-Repo Workspaces**: Merge multiple repositories into a single Notebook with namespaces and a `WorkspaceIndex.md` cross-repo guide.
+
+---
+
+## What's New in v0.3
+
+- **Reduce Metadata-Induced Source Churn**: Standard body-only code modifications no longer trigger unnecessary remote source re-uploads due to global HEAD commit shifts. In real Gemini Notebook E2E testing, remote replacements for single-file edits drop from **5/5 (100%)** in v0.2 down to **3/5 (60%)**.
+- **Stable Per-File Permalinks**: GitHub permalinks in RepoBook chapters no longer anchor indiscriminately to the latest repository HEAD. Unchanged files pin strictly to their last content-changing commit SHA, ensuring chapter byte-stability without sacrificing permalink content correctness.
+- **Stable GraphBook**: `GraphBook.md` omits volatile snapshot commit metadata. When import relationships, directory roles, and file topologies remain unchanged, `GraphBook.md` stays byte-identical, eliminating churn while still updating reliably when dependencies actually change.
+- **v0.2 → v0.3 Manifest Migration**: Seamlessly upgrades legacy v0.2 `manifest.json` files lacking per-file commit records. Automatically backfills each file's last-touch commit from Git history into the upgraded manifest, with safe fallbacks for shallow clones.
 
 ---
 

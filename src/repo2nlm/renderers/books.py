@@ -86,7 +86,8 @@ def render_repobook(
 
     def _render_file_section(item: FileRecord) -> list[str]:
         lines = [f"## {item.path}", ""]
-        permalink = get_github_permalink(repo_url, commit, item.path)
+        file_commit = getattr(item, "commit", None) or commit
+        permalink = get_github_permalink(repo_url, file_commit, item.path)
         if permalink:
             lines.append(f"- Source: `{permalink}`")
         lines.extend(
@@ -161,8 +162,6 @@ def render_graphbook(out_dir: Path, repo_url: str, branch: str, commit: str, edg
         "## Project Overview",
         "",
         f"- Repo: `{repo_url}`",
-        f"- Branch: `{branch}`",
-        f"- Commit: `{commit}`",
         f"- Import edges: `{len(edges)}`",
         "",
         "## Entry Candidates",
@@ -211,6 +210,7 @@ def write_manifest(out_dir: Path, repo_url: str, branch: str, commit: str, files
                 "size": f.size,
                 "lang": f.lang,
                 "text": f.text,
+                "commit": getattr(f, "commit", None) or commit,
             }
             for f in files
         ],

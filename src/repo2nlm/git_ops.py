@@ -32,3 +32,36 @@ def prepare_repo_snapshot(repo_url: str, dest_dir: Path, branch: str | None, com
 
     final_commit = run_git(["rev-parse", "HEAD"], cwd=dest_dir)
     return target_branch, final_commit
+
+
+def get_file_last_commits(repo_dir: Path, file_paths: set[str], fallback_commit: str) -> dict[str, str]:
+    if not file_paths:
+        return {}
+    try:
+        is_shallow = run_git(["rev-parse", "--is-shallow-repository"], cwd=repo_dir) == "true"
+        if is_shallow:
+            return {p: fallback_commit for p in file_paths}
+    except Exception:
+        return {p: fallback_commit for p in file_paths}
+
+    commits: dict[str, str] = {}
+    needed = set(file_paths)
+    try:
+        out = run_git(["log", "--name-only", "--format=COMMIT:%H"], cwd=repo_dir)
+        current_commit = None
+        for line in out.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("COMMIT:"):
+                current_commit = line.removeprefix("COMMIT:")
+            elif current_commit and line in needed and line not in commits:
+                commits[line] = current_commit
+                if len(commits) == len(file_paths):
+                    break
+    except Exception:
+        pass
+    for p in file_paths:
+        if p not in commits:
+            commits[p] = fallback_commit
+    return commits

@@ -5,9 +5,10 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from .config import DEFAULT_EXCLUDES
-from .git_ops import prepare_repo_snapshot
+from .git_ops import get_file_last_commits, prepare_repo_snapshot
 from .graph_builder import build_graph
 from .renderers.books import (
     render_changebook,
@@ -34,18 +35,21 @@ def ingest(repo_url: str, out_dir: Path, branch: str | None, commit: str | None,
     ex_patterns = default_ex + extra_ex
 
     # 1. Snapshot previous manifest state before any file generation or clone
-    prev: dict[str, str] = {}
+    prev: dict[str, dict[str, Any]] = {}
     prev_commit: str | None = None
     has_previous = False
     if previous_manifest and previous_manifest.exists():
         try:
             prev_data = json.loads(previous_manifest.read_text(encoding="utf-8"))
+            prev_commit = prev_data.get("repo", {}).get("commit")
             prev = {
-                x["path"]: x["sha"]
+                x["path"]: {
+                    "sha": x["sha"],
+                    "commit": x.get("commit"),
+                }
                 for x in prev_data.get("files", [])
                 if isinstance(x, dict) and "path" in x and "sha" in x
             }
-            prev_commit = prev_data.get("repo", {}).get("commit")
             has_previous = True
         except Exception:
             prev = {}
@@ -62,12 +66,28 @@ def ingest(repo_url: str, out_dir: Path, branch: str | None, commit: str | None,
             import fnmatch
             files = [f for f in files if any(fnmatch.fnmatch(f.path, p) for p in include_patterns)]
 
+        # Resolve stable per-file commits for permalink provenance
+        git_commits: dict[str, str] | None = None
+        for f in files:
+            is_unchanged = has_previous and f.path in prev and f.sha256 == prev[f.path]["sha"]
+            file_prev_commit = prev[f.path].get("commit") if is_unchanged else None
+
+            if is_unchanged and file_prev_commit:
+                f.commit = file_prev_commit
+            else:
+                # File is new/modified, or upgrading from a legacy manifest lacking per-file commit.
+                # Derive per-file last-touch commit from git history.
+                if git_commits is None:
+                    git_commits = get_file_last_commits(repo_dir, {item.path for item in files}, final_commit)
+                fallback = prev_commit if (is_unchanged and prev_commit) else final_commit
+                f.commit = git_commits.get(f.path, fallback)
+
         edges, dirs, entries, graph_metrics = build_graph(files)
 
         curr = {f.path: f.sha256 for f in files}
         if has_previous:
             added = sorted([p for p in curr if p not in prev])
-            modified = sorted([p for p in curr if p in prev and curr[p] != prev[p]])
+            modified = sorted([p for p in curr if p in prev and curr[p] != prev[p]["sha"]])
             deleted = sorted([p for p in prev if p not in curr])
         else:
             added = sorted(curr.keys())
