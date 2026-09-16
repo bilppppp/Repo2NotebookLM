@@ -6,7 +6,7 @@
 
 Convert Git repositories into structured knowledge bases tailored for Gemini Notebook (formerly NotebookLM).
 
-> **Current Version**: `v0.3.0`
+> **Current Version**: `v0.3.1`
 
 ---
 
@@ -36,6 +36,8 @@ Repo2NotebookLM bridges **Git Repo → Structured Sources → Gemini Notebook �
 - **Stable Per-File Permalinks**: GitHub permalinks in RepoBook chapters no longer anchor indiscriminately to the latest repository HEAD. Unchanged files pin strictly to their last content-changing commit SHA, ensuring chapter byte-stability without sacrificing permalink content correctness.
 - **Stable GraphBook**: `GraphBook.md` omits volatile snapshot commit metadata. When import relationships, directory roles, and file topologies remain unchanged, `GraphBook.md` stays byte-identical, eliminating churn while still updating reliably when dependencies actually change.
 - **v0.2 → v0.3 Manifest Migration**: Seamlessly upgrades legacy v0.2 `manifest.json` files lacking per-file commit records. Automatically backfills each file's last-touch commit from Git history into the upgraded manifest, with safe fallbacks for shallow clones.
+
+> **v0.3.1 Patch**: Fixes nondeterministic entry-candidate ordering that could cause source churn on unchanged repositories.
 
 ---
 

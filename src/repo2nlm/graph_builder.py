@@ -143,7 +143,8 @@ def _build_js_edges(js_files: list[FileRecord], file_set: set[str]) -> list[Impo
 
 
 def detect_entries(files: list[FileRecord]) -> list[dict[str, str]]:
-    paths = {f.path for f in files}
+    paths = sorted(f.path for f in files)
+    path_set = set(paths)
     entries: list[dict[str, str]] = []
 
     for p in ENTRY_CANDIDATES["python"]:
@@ -152,17 +153,17 @@ def detect_entries(files: list[FileRecord]) -> list[dict[str, str]]:
                 entries.append({"path": fp, "why": f"filename matches {p}"})
 
     for p in ENTRY_CANDIDATES["jsts"]:
-        if p in paths:
+        if p in path_set:
             entries.append({"path": p, "why": f"common JS/TS entry {p}"})
 
     for p in ENTRY_CANDIDATES["config"]:
-        if p in paths:
+        if p in path_set:
             entries.append({"path": p, "why": f"runtime/build config {p}"})
 
     uniq = {}
     for e in entries:
         uniq[e["path"]] = e
-    return list(uniq.values())
+    return sorted(uniq.values(), key=lambda e: (e["path"], e["why"]))
 
 
 def infer_dir_roles(files: list[FileRecord], edges: list[ImportEdge], entries: list[dict[str, str]]) -> list[dict[str, object]]:

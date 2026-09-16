@@ -6,7 +6,7 @@
 
 把 Git 仓库转换为适合 Gemini Notebook（原 NotebookLM）长期使用的结构化知识库。
 
-> **当前版本**：`v0.3.0`
+> **当前版本**：`v0.3.1`
 
 ---
 
@@ -36,6 +36,8 @@ Repo2NotebookLM 把 **Git Repo → 结构化 Sources → Gemini Notebook → 增
 - **逐文件稳定 GitHub 永久链接 (Stable Per-File Permalinks)**：代码段落的 GitHub 永久链接不再全量绑定全局 HEAD，而是精准锚定该文件最后一次产生实质修改的 Commit SHA。未修改文件的 Permalink 永久保持稳定，确保对应的 RepoBook 章节哈希不变（byte-stable），同时严格保证链接所指代码与章节正文的绝对一致。
 - **拓扑幂等的 GraphBook 架构图 (Stable GraphBook)**：`GraphBook.md` 不再携带易变的快照 Commit 元数据。当项目模块导入关系、目录职责和代码拓扑结构未发生变化时，`GraphBook.md` 保持逐字节完全一致（byte-identical），消除无意义重传；依赖图变更时仍精准触发更新。
 - **v0.2 → v0.3 Manifest 平滑迁移与回填 (v0.2 → v0.3 Migration)**：自动兼容未记录单文件 Commit 的 v0.2 旧版 `manifest.json`。增量更新时自动从 Git 历史中高效回填每个文件的最后修改 Commit 并持久化升级，在浅克隆（shallow clone）或历史受限场景下具备安全的 fallback 保障。
+
+> **v0.3.1 补丁**：修复了 entry candidate 非确定性排序导致的零改动 Source churn。
 
 ---
 
