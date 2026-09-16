@@ -1,10 +1,26 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
 from ..types import FileRecord, ImportEdge
+
+
+def get_github_permalink(repo_url: str, commit: str, file_path: str) -> str | None:
+    if not repo_url or not commit:
+        return None
+    clean_url = repo_url.strip()
+    m = re.match(
+        r"^(?:https?://github\.com/|git@github\.com:|ssh://git@github\.com/)([^/]+)/([^/]+?)(?:\.git)?/?$",
+        clean_url,
+    )
+    if not m:
+        return None
+    owner, repo = m.group(1), m.group(2)
+    norm_path = file_path.lstrip("/").replace("\\", "/")
+    return f"https://github.com/{owner}/{repo}/blob/{commit}/{norm_path}"
 
 
 def _render_tree(paths: list[str]) -> str:
@@ -28,9 +44,19 @@ def _render_tree(paths: list[str]) -> str:
     return "\n".join(lines)
 
 
-def render_repobook(out_dir: Path, repo_url: str, branch: str, commit: str, files: list[FileRecord], entries: list[dict[str, str]]) -> list[Path]:
+def render_repobook(
+    out_dir: Path,
+    repo_url: str,
+    branch: str,
+    commit: str,
+    files: list[FileRecord],
+    entries: list[dict[str, str]],
+    split_repobook: bool = True,
+) -> list[Path]:
     repodir = out_dir / "RepoBook"
     repodir.mkdir(parents=True, exist_ok=True)
+    for old in repodir.glob("*.md"):
+        old.unlink()
 
     text_files = [f for f in files if f.text]
     paths = [f.path for f in files]
@@ -58,6 +84,34 @@ def render_repobook(out_dir: Path, repo_url: str, branch: str, commit: str, file
 
     overview.extend(["", "## Directory Tree", "", "```text", tree, "```", "", "## README Summary", "", readme_summary or "(no README found)"])
 
+    def _render_file_section(item: FileRecord) -> list[str]:
+        lines = [f"## {item.path}", ""]
+        permalink = get_github_permalink(repo_url, commit, item.path)
+        if permalink:
+            lines.append(f"- Source: `{permalink}`")
+        lines.extend(
+            [
+                f"- Size: `{item.size}` bytes",
+                f"- SHA256: `{item.sha256}`",
+                f"- Truncated: `{item.truncated}`",
+                "",
+                f"```{item.lang or ''}",
+                item.content,
+                "```",
+                "",
+            ]
+        )
+        return lines
+
+    if not split_repobook:
+        single_lines = list(overview)
+        single_lines.extend(["", "# Files", ""])
+        for item in sorted(text_files, key=lambda x: x.path):
+            single_lines.extend(_render_file_section(item))
+        repobook_path = repodir / "RepoBook.md"
+        repobook_path.write_text("\n".join(single_lines), encoding="utf-8")
+        return [repobook_path]
+
     overview_path = repodir / "00_overview.md"
     overview_path.write_text("\n".join(overview), encoding="utf-8")
 
@@ -83,20 +137,7 @@ def render_repobook(out_dir: Path, repo_url: str, branch: str, commit: str, file
         ]
 
         for item in items:
-            lines.extend(
-                [
-                    f"## {item.path}",
-                    "",
-                    f"- Size: `{item.size}` bytes",
-                    f"- SHA256: `{item.sha256}`",
-                    f"- Truncated: `{item.truncated}`",
-                    "",
-                    f"```{item.lang or ''}",
-                    item.content,
-                    "```",
-                    "",
-                ]
-            )
+            lines.extend(_render_file_section(item))
 
         chapter_path = repodir / f"{idx:02d}_{group.replace('/', '_').replace('.', '_')}.md"
         chapter_path.write_text("\n".join(lines), encoding="utf-8")
@@ -203,4 +244,58 @@ def write_graph_json(out_dir: Path, edges: list[ImportEdge], dirs: list[dict[str
 def write_stats(out_dir: Path, stats: dict[str, object]) -> Path:
     p = out_dir / "stats.json"
     p.write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
+    return p
+
+
+def render_changebook(
+    out_dir: Path,
+    repo_url: str,
+    current_commit: str,
+    previous_commit: str | None,
+    added: list[str],
+    modified: list[str],
+    deleted: list[str],
+) -> Path:
+    lines = [
+        "# ChangeBook",
+        "",
+        "## Version",
+        "",
+        f"- Previous commit: `{previous_commit or '(initial snapshot)'}`",
+        f"- Current commit: `{current_commit}`",
+        "",
+        "## Summary",
+        "",
+    ]
+    if previous_commit:
+        lines.extend(
+            [
+                f"- Added: `{len(added)}` files",
+                f"- Modified: `{len(modified)}` files",
+                f"- Deleted: `{len(deleted)}` files",
+            ]
+        )
+    else:
+        lines.append(f"- Initial snapshot with `{len(added)}` files.")
+
+    lines.extend(["", "## Added Files", ""])
+    if added:
+        lines.extend([f"- `{p}`" for p in added])
+    else:
+        lines.append("- (none)")
+
+    lines.extend(["", "## Modified Files", ""])
+    if modified:
+        lines.extend([f"- `{p}`" for p in modified])
+    else:
+        lines.append("- (none)")
+
+    lines.extend(["", "## Deleted Files", ""])
+    if deleted:
+        lines.extend([f"- `{p}`" for p in deleted])
+    else:
+        lines.append("- (none)")
+
+    p = out_dir / "ChangeBook.md"
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return p

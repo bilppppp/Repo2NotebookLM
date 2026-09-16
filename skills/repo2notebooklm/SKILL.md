@@ -18,11 +18,19 @@ Use this skill to run the local `repo2nlm` tool end-to-end.
 
 ## Preconditions
 
-- Run in project root: `/Users/gravity/Desktop/AI/Repo 到NotebookLM `
+- Run in project root: `/Users/gravity/Desktop/AI/Repo2NotebookLM`
 - Activate venv: `. .venv/bin/activate`
 - `repo2nlm` executable exists in root
 
 ## Workflow
+
+### Recommended: One-step Incremental Sync
+
+```bash
+./repo2nlm sync <repo_url> --notebook "<name_or_id>" --create-if-missing
+```
+
+### Advanced: Step-by-Step Workflow
 
 1. Ingest repository
 
@@ -69,16 +77,21 @@ bash skills/repo2notebooklm/scripts/cleanup_out.sh ./out-<name> --audit-only
 
 - `out-<name>/RepoBook/*.md`
 - `out-<name>/GraphBook.md`
+- `out-<name>/ChangeBook.md`
 - `out-<name>/manifest.json`
 - `out-<name>/graph.json`
 - `out-<name>/stats.json`
-- `out-<name>/upload_map.json` (generated after `upload`)
+- `out-<name>/upload_map.json` (generated after `upload` or `sync`)
 - Multi-repo upload only: remote `WorkspaceIndex.md`
 
 ## Notes
 
+- Verified with `notebooklm-py==0.8.2` (Target compatibility range: `>=0.8.2,<0.9.0`).
+- Subcommands used: `source list`, `source add`, `source wait`, `source delete`, `source rename`, `create`, `list`.
 - `ingest` supports `--branch`, `--commit`, `--include`, `--exclude`, `--max-file-kb`
 - `update` compares with existing `manifest.json` and reports changed/deleted files
+- `ChangeBook.md` reflects "最近一次实际仓库变更"; in no-op syncs with no changes, it is not rewritten.
+- `sync` uses Ownership Guard (only deletes managed IDs) and Staged Replacement (uploads staging source before deleting old version).
 - If upload fails, verify NotebookLM login with `notebooklm login`
 - `upload` includes auto-recovery behavior:
   - auto-split large markdown files to `*.partNN.md`

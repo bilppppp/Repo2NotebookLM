@@ -4,18 +4,19 @@
 
 把 GitHub 仓库转换为 NotebookLM 结构化学习材料，输出：
 
-- `RepoBook/`（代码与文档正文）
+- `RepoBook/`（代码与文档正文，支持 commit 永久链接）
 - `GraphBook.md`（目录职责 + import 关系）
-- `manifest.json`（文件索引）
+- `ChangeBook.md`（版本变更检测与增量对比）
+- `manifest.json`（文件索引与 Hash）
 - `graph.json`（依赖图数据）
-- `stats.json`（统计与增量变更）
+- `stats.json`（统计与变更数据）
 
 ## 给 AI Agent 安装
 
 可以直接把这句话发给你的 AI agent：
 
 ```text
-帮我安装 repo2nlm：https://raw.githubusercontent.com/bilppppp/Repo2NotebookLM-/main/install.md
+帮我安装 repo2nlm：https://raw.githubusercontent.com/bilppppp/Repo2NotebookLM/main/install.md
 ```
 
 安装说明文档：[`install.md`](install.md)
@@ -27,39 +28,70 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
 pip install -e .
-# NotebookLM 非官方 API/CLI
-pip install git+https://github.com/teng-lin/notebooklm-py.git
+# 经过真实环境严格验证的 notebooklm-py 版本 (实测版本: 0.8.2，目标兼容: >=0.8.2,<0.9.0)
+pip install "notebooklm-py[browser]>=0.8.2,<0.9.0"
+playwright install chromium
 ```
 
-> notebooklm-py: https://github.com/teng-lin/notebooklm-py?tab=readme-ov-file
+> **实测验证的 CLI 子命令**：
+> - `notebooklm --version`（版本探测）
+> - `notebooklm list --json`（获取 Notebook 列表）
+> - `notebooklm create <title> --json`（创建缺失的 Notebook）
+> - `notebooklm source list -n <nb> --json`（拉取远端 Sources 状态）
+> - `notebooklm source add <file> -n <nb> --json`（上传 Markdown）
+> - `notebooklm source wait <id> -n <nb> --timeout 300`（等待 Source 达到 ready 状态）
+> - `notebooklm source delete <id> -n <nb> -y`（严格受控删除废弃受控 Source）
+> - `notebooklm source rename <id> <new_title> -n <nb>`（故障安全的分阶段替换，保证上传失败时不破坏旧 Source）
 
-## 用法
+> notebooklm-py 官方仓库: https://github.com/teng-lin/notebooklm-py
+
+## 推荐用法（一键增量同步）
 
 ```bash
+# 第一次运行：快照 -> 分析 -> 渲染 -> 创建 Notebook -> 上传 -> 校验
+# 之后再次运行：比较上次状态 -> 重新渲染 -> 真正的增量 Source 替换同步
+repo2nlm sync https://github.com/owner/repo \
+  --notebook my-project \
+  --create-if-missing
+```
+
+### 高级与分步用法
+
+```bash
+# 单独解析与渲染（支持 --no-split-repobook 输出单文件 RepoBook）
 repo2nlm ingest <repo_url> --branch main --out ./out --max-file-kb 200 \
   --exclude "node_modules/**,dist/**,.git/**"
 
+# 基于旧 manifest 增量生成 ChangeBook.md
 repo2nlm update <repo_url> --out ./out
 
+# 单独上传 / 同步到已有 notebook
 repo2nlm upload ./out --notebook <name_or_id> --create-if-missing
-# 完整刷新远端同名 source（避免保留旧内容）
+# 强制全量覆盖替换同名 source
 repo2nlm upload ./out --notebook <name_or_id> --replace-existing
 
-# 把多个仓库输出合并上传到同一个 notebook
-# 会自动把远端 source 标题改成 <repo>__<filename>.md 以避免冲突
-# 同时会生成一个 WorkspaceIndex.md，便于跨 repo 导航和对比
+# 多仓库合并上传：自动使用命名空间并生成 WorkspaceIndex.md
 repo2nlm upload ./out-mlflow ./out-dispatch ./out-hermes-agent \
   --notebook <name_or_id> --create-if-missing
 ```
 
-## 说明
+## 核心特性与说明
 
-- `update` 会读取旧 `manifest.json` 计算变更文件，并重建输出。
-- `upload` 依赖 `notebooklm` CLI（由 `notebooklm-py` 安装提供）。
-- 如果希望 NotebookLM 中内容与本地 `out/` 严格一致，使用 `--replace-existing` 强制替换同名 source。
-- `upload` 支持一次传入多个 `out-*` 目录；当目录数量大于 1 时，会自动使用 `out-` 后缀作为 repo 命名空间，把上传标题写成 `<repo>__<filename>.md`，避免不同 repo 的 `00_overview.md` / `GraphBook.md` 互相覆盖。
-- 多目录上传时还会额外生成一个 `WorkspaceIndex.md`，汇总 repo 元信息、GraphBook 入口和跨 repo 提问建议。
-- 对超大仓库会自动切换为分批上传+分批等待（无须额外参数），减少超长上传过程中的遗漏风险。
+- **一键统一命令 (`sync`)**：自动识别是否存在旧 manifest，初次自动完整导入，再次运行自动进行增量更新与同步。
+- **所有权安全守护 (Ownership Guard)**：
+  - 远端删除操作受 `remote_source_id in all_prev_managed_ids` 强约束。
+  - **绝不依据标题相同就误删用户的个人手工文档或笔记**（即使标题与生成的章节、Purge 标题或 Split 分片重名也受到绝对保护）。
+- **故障安全的分阶段替换 (Failure-Safe Staged Replacement)**：
+  - 当某个受管 Source 发生变更时，先上传临时暂存 Source 并确认其达到 `ready` 状态。
+  - 唯有在上传与就绪成功后，才删除旧 Source 并将新 Source 重命名为规范标题。
+  - 若上传或就绪中途失败，旧 Source 保持完整无损，个人文档保持完整无损，同步操作显式报错。
+- **ChangeBook.md 生命周期语义**：
+  - 代表“最近一次实际仓库变更”（新增、修改、删除的文件列表及前后的 Commit SHA）。
+  - 在无代码变更的 no-op sync 场景下，**绝不改写现有 ChangeBook.md**，保证文件 Hash 不变且远端发生 0 次上传与 0 次删除。
+- **永久 GitHub Permalink**：对于 GitHub 仓库，RepoBook 中每个文件条目均生成精确绑定到当前 Commit SHA 的永久链接。
+- **上传稳定性防护与工作机制**：
+  - 针对逆向 API 长连接与传输限制，客户端默认启用 4 MB 分割与分批上传策略。
+  - *说明*：Google Gemini Notebook 官方文档单文件上限为 200 MB / 50 万字，免费版支持 50 个 sources（付费版最高 600 个）。repo2nlm 内部的 4 MB / 2 MB 分块是保证非官方 API 上传稳定性的经验工作区，避免超时或断连。
 
 ## 上传后是否保留本地 out 目录
 

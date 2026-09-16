@@ -5,13 +5,13 @@
 Copy this to your AI agent:
 
 ```text
-帮我安装 repo2nlm：https://raw.githubusercontent.com/bilppppp/Repo2NotebookLM-/main/install.md
+帮我安装 repo2nlm：https://raw.githubusercontent.com/bilppppp/Repo2NotebookLM/main/install.md
 ```
 
 English version:
 
 ```text
-Help me install repo2nlm: https://raw.githubusercontent.com/bilppppp/Repo2NotebookLM-/main/install.md
+Help me install repo2nlm: https://raw.githubusercontent.com/bilppppp/Repo2NotebookLM/main/install.md
 ```
 
 ---
@@ -46,15 +46,29 @@ python -m pip install -U pip
 
 ```bash
 pip install -e .
-pip install git+https://github.com/teng-lin/notebooklm-py.git
+# Tested & verified with notebooklm-py 0.8.2 (Target compatibility: >=0.8.2,<0.9.0)
+pip install "notebooklm-py[browser]>=0.8.2,<0.9.0"
+playwright install chromium
 ```
 
 ### Step 3: Verify commands
 
 ```bash
 ./repo2nlm --help
+./repo2nlm sync --help
 notebooklm --help
+notebooklm --version  # Tested version: 0.8.2
 ```
+
+> **Verified CLI Subcommands**:
+> - `notebooklm --version`
+> - `notebooklm list --json`
+> - `notebooklm create <title> --json`
+> - `notebooklm source list -n <nb> --json`
+> - `notebooklm source add <file> -n <nb> --json`
+> - `notebooklm source wait <id> -n <nb> --timeout 300`
+> - `notebooklm source delete <id> -n <nb> -y`
+> - `notebooklm source rename <id> <new_title> -n <nb>` (used for failure-safe staged replacement)
 
 ### Step 4: Check NotebookLM auth
 
@@ -70,7 +84,13 @@ notebooklm login
 
 ### Step 5: Smoke test
 
-Single repo flow:
+Single repo flow (recommended: `sync` for true incremental sync):
+
+```bash
+./repo2nlm sync <repo_url> --notebook "<name_or_id>" --create-if-missing
+```
+
+Or step-by-step:
 
 ```bash
 ./repo2nlm ingest <repo_url> --out ./out-<name> --max-file-kb 200
@@ -110,6 +130,7 @@ Acceptance rule:
 ### Quick Reference
 
 ```bash
+./repo2nlm sync <repo_url> --notebook "<name_or_id>" --create-if-missing
 ./repo2nlm ingest <repo_url> --out ./out-<name> --max-file-kb 200
 ./repo2nlm update <repo_url> --out ./out-<name>
 ./repo2nlm upload ./out-<name> --notebook "<name_or_id>" --create-if-missing

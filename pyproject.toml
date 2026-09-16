@@ -4,11 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "repo2nlm"
-version = "0.1.0"
-description = "Git repo to NotebookLM structured importer (RepoBook + GraphBook)"
+version = "0.2.0"
+description = "Git repo to NotebookLM structured importer (RepoBook + GraphBook + ChangeBook)"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
+
+[project.optional-dependencies]
+notebooklm = [
+    "notebooklm-py[browser]>=0.8.2,<0.9.0",
+]
 
 [project.scripts]
 repo2nlm = "repo2nlm.cli:main"

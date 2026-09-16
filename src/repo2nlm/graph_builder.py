@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import posixpath
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -60,33 +61,43 @@ def _resolve_js_import(current: str, spec: str, file_set: set[str]) -> tuple[str
     if not spec.startswith(".") and not spec.startswith("/"):
         return spec, True
 
-    base = Path(current).parent
-    rel = Path(spec)
+    curr_norm = current.replace("\\", "/")
+    base_dir = posixpath.dirname(curr_norm)
+
     if spec.startswith("/"):
-        candidate = Path(spec.lstrip("/"))
+        rel_target = spec.lstrip("/")
     else:
-        candidate = (base / rel).resolve().as_posix()
-        candidate = Path(candidate)
+        rel_target = posixpath.join(base_dir, spec) if base_dir else spec
+
+    norm_target = posixpath.normpath(rel_target)
+    if norm_target == "." or norm_target.startswith("../"):
+        return spec, True
 
     candidates: list[str] = []
-    if candidate.suffix:
-        candidates.append(candidate.as_posix())
-    else:
-        exts = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"]
-        for ext in exts:
-            candidates.append((candidate.as_posix() + ext))
-        for ext in exts:
-            candidates.append((candidate / f"index{ext}").as_posix())
+
+    ext = posixpath.splitext(norm_target)[1]
+    if ext:
+        candidates.append(norm_target)
+        if ext in {".js", ".jsx", ".mjs", ".cjs"}:
+            stem = posixpath.splitext(norm_target)[0]
+            for ts_ext in [".ts", ".tsx", ".mts", ".cts"]:
+                candidates.append(stem + ts_ext)
+
+    default_exts = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".json"]
+    for e in default_exts:
+        if not norm_target.endswith(e):
+            candidates.append(norm_target + e)
+
+    index_exts = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"]
+    for e in index_exts:
+        candidates.append(posixpath.join(norm_target, f"index{e}"))
 
     for c in candidates:
-        norm = Path(c).as_posix()
-        if norm.startswith("/"):
-            norm = norm.lstrip("/")
-        if norm in file_set:
-            return norm, False
+        if c in file_set:
+            return c, False
 
-    raw = Path(candidates[0]).as_posix().lstrip("/") if candidates else spec
-    return raw, not (raw in file_set)
+    fallback = candidates[0] if candidates else norm_target
+    return fallback, not (fallback in file_set)
 
 
 def _build_python_edges(py_files: list[FileRecord], module_index: dict[str, str]) -> list[ImportEdge]:
