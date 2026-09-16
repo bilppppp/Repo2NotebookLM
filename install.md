@@ -22,119 +22,109 @@ Help me install repo2nlm: https://raw.githubusercontent.com/bilppppp/Repo2Notebo
 
 Install `repo2nlm` in the current project so the user can:
 
-- ingest GitHub repositories into RepoBook + GraphBook outputs
-- upload one or more `out-*` directories to NotebookLM
-- merge multiple repos into one NotebookLM notebook
-- generate `WorkspaceIndex.md` for cross-repo navigation
+- Ingest Git repositories into structured RepoBook, GraphBook, and ChangeBook formats
+- Incrementally sync codebooks to Gemini Notebook (formerly NotebookLM)
+- Support multi-repo workspaces with a generated navigation index (`WorkspaceIndex.md`)
 
 ### Boundaries
 
 - Do not use `sudo` unless the user explicitly approves it
 - Do not modify files outside this project unless required by Python/venv setup
 - Prefer using the project-local virtual environment at `.venv/`
-- If NotebookLM authentication is missing, stop and ask the user to log in
+- If Gemini Notebook authentication is missing or expired, stop and ask the user to log in
+
+---
 
 ### Step 1: Set up the virtual environment
 
 ```bash
+git clone https://github.com/bilppppp/Repo2NotebookLM.git
+cd Repo2NotebookLM
+
 python3 -m venv .venv
-. .venv/bin/activate
+source .venv/bin/activate
 python -m pip install -U pip
 ```
 
-### Step 2: Install repo2nlm and NotebookLM CLI
+---
+
+### Step 2: Install repo2nlm
+
+#### Option A: Full Install (with Gemini Notebook sync, recommended)
+
+```bash
+pip install -e '.[notebooklm]'
+playwright install chromium
+```
+
+> **Note**: `playwright install chromium` is only required for the interactive `notebooklm login` browser flow. Routine `repo2nlm sync` calls run headless without launching a browser.
+
+#### Option B: Core-Only Install (local analysis, no cloud upload)
 
 ```bash
 pip install -e .
-# Tested & verified with notebooklm-py 0.8.2 (Target compatibility: >=0.8.2,<0.9.0)
-pip install "notebooklm-py[browser]>=0.8.2,<0.9.0"
-playwright install chromium
 ```
+
+---
 
 ### Step 3: Verify commands
 
 ```bash
-./repo2nlm --help
-./repo2nlm sync --help
+repo2nlm --help
+repo2nlm sync --help
+
+# If Option A was installed:
 notebooklm --help
 notebooklm --version  # Tested version: 0.8.2
 ```
 
-> **Verified CLI Subcommands**:
-> - `notebooklm --version`
-> - `notebooklm list --json`
-> - `notebooklm create <title> --json`
-> - `notebooklm source list -n <nb> --json`
-> - `notebooklm source add <file> -n <nb> --json`
-> - `notebooklm source wait <id> -n <nb> --timeout 300`
-> - `notebooklm source delete <id> -n <nb> -y`
-> - `notebooklm source rename <id> <new_title> -n <nb>` (used for failure-safe staged replacement)
+---
 
-### Step 4: Check NotebookLM auth
+### Step 4: Check NotebookLM authentication (Option A only)
 
 ```bash
-notebooklm auth check
+notebooklm auth check --test
 ```
 
-If auth is not ready, ask the user to run:
+If auth is not ready or expired, ask the user to run:
 
 ```bash
 notebooklm login
 ```
 
+---
+
 ### Step 5: Smoke test
 
-Single repo flow (recommended: `sync` for true incremental sync):
+#### Single repo incremental sync (recommended):
 
 ```bash
-./repo2nlm sync <repo_url> --notebook "<name_or_id>" --create-if-missing
+repo2nlm sync <repo_url> --notebook "<name_or_id>" --create-if-missing
 ```
 
-Or step-by-step:
+#### Local-only analysis:
 
 ```bash
-./repo2nlm ingest <repo_url> --out ./out-<name> --max-file-kb 200
-./repo2nlm upload ./out-<name> --notebook "<name_or_id>" --create-if-missing
+repo2nlm ingest <repo_url> --out ./out-<name> --max-file-kb 200
+repo2nlm update <repo_url> --out ./out-<name>
 ```
 
-Multi-repo flow:
+#### Multi-repo merge upload:
 
 ```bash
-./repo2nlm upload ./out-foo ./out-bar --notebook "<name_or_id>" --create-if-missing
+repo2nlm upload ./out-foo ./out-bar --notebook "<name_or_id>" --create-if-missing
 ```
+
+---
 
 ### Step 6: Verify upload correctness
 
-For a single repo:
+Check `upload_map.json` in the output directory:
 
 ```bash
 jq '{requested_notebook, expected_titles_count, ready_titles_count, missing_titles}' ./out-<name>/upload_map.json
 ```
 
-For a merged notebook:
-
-1. Read all relevant `upload_map.json` files
-2. Union every `items[].uploaded_titles`
-3. Compare that union with:
-
-```bash
-notebooklm source list -n <notebook_id> --json
-```
-
 Acceptance rule:
-
-- no missing titles
-- no extra titles
-- all remote sources are `ready`
-
-### Quick Reference
-
-```bash
-./repo2nlm sync <repo_url> --notebook "<name_or_id>" --create-if-missing
-./repo2nlm ingest <repo_url> --out ./out-<name> --max-file-kb 200
-./repo2nlm update <repo_url> --out ./out-<name>
-./repo2nlm upload ./out-<name> --notebook "<name_or_id>" --create-if-missing
-./repo2nlm upload ./out-foo ./out-bar --notebook "<name_or_id>" --create-if-missing
-notebooklm auth check
-notebooklm source list -n <notebook_id> --json
-```
+- `missing_titles` must be empty (`[]`)
+- all expected titles must have `ready` status on remote
