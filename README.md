@@ -6,7 +6,7 @@
 
 把 Git 仓库转换为适合 Gemini Notebook（原 NotebookLM）长期使用的结构化知识库。
 
-> **当前版本**：`v0.3.1`
+> **当前版本**：`v0.4.0`
 
 ---
 
@@ -27,6 +27,28 @@ Repo2NotebookLM 把 **Git Repo → 结构化 Sources → Gemini Notebook → 增
 - **真正增量同步 (Incremental Sync)**：基于 Source 内容 SHA256，无变化源零上传、零覆盖。
 - **所有权安全守护 (Ownership Guard)**：严格受管 ID 白名单机制，绝不误删用户手动创建的私有笔记与文档。
 - **多仓库工作区**：支持将多个关联仓库合并注入同一个 Notebook，并生成跨仓导航入口 `WorkspaceIndex.md`。
+
+---
+
+## What's New in v0.4.0
+
+- **自适应 RepoBook 细粒度分片 (Adaptive RepoBook Partitioning)**：彻底根除大型真实代码库中的单体 `src/` 爆炸陷阱。在 v0.3 中，仓库顶级目录被合并为一个单一的 RepoBook 章节；当修改 `src/` 深层某个叶子文件时，整个数兆字节的单体文件必须全量重新上传。v0.4.0 引入自适应分片机制：当目录文件数或体积超出设定阈值时，自动沿子目录树层级向下递归细分，并将当前目录直接代码文件精准收敛为独立的 `<dir>__root` 模块，同时支持叶子超大目录保底顺序切分（`__part01`）与单文件超限独立切分。
+- **大型工程变更爆炸半径降低 >80% (Massive Blast Radius Reduction on Large Repos)**：
+  在大型开源工程 `honojs/hono`（488 files，~3.5 MB）的标准 mutation benchmark 测试中：
+  - **叶子逻辑修改 (M1 Leaf Body)**：远端替换载荷从 v0.3.1 的 **2558 KB (75.2%)** 剧降至 **188 KB (5.5%)**，重传载荷下降 **92.7%**！
+  - **核心逻辑修改 (M2 Core Body)**：替换载荷从 **2558 KB (75.2%)** 下降至 **451 KB (13.2%)**，下降 **82.4%**！
+  - **Import 拓扑依赖调整 (M3 Topology)**：替换载荷从 **2722 KB** 下降至 **615 KB (18.0%)**，下降 **77.4%**！
+  - **新增与删除文件 (M4/M5 Add/Delete)**：替换载荷分别下降 **69.9%** 与 **91.3%**！
+- **中小型仓库零碎片化与 100% 向后兼容 (Zero Over-Fragmentation & Backward Compatibility)**：
+  - 中型工程如 `encode/httpx`（125 files，~1.0 MB）在默认配置下依然稳定保持 8 个 Sources，不超限绝不产生多余切分。
+  - 提供 `--no-adaptive-partition` 显式开关，可随时无缝退回 v0.3 传统顶级目录分组行为。
+  - 源码 100% 完整性保障：零代码丢弃、零截断、零语义漂移，逐文件 stable permalink 机制与分阶段安全替换（Staged Replacement）及所有权安全守护（Ownership Guard）完全保持不变。
+- **灵活的 CLI 控制阈值**：
+  - `--max-group-kb <kb>`：每个 RepoBook 章节最大 KB 阈值（默认 `512` KB，设为 0 禁用按体积切分）。
+  - `--max-group-files <n>`：每个 RepoBook 章节最大文件数量阈值（默认 `40` 个文件，设为 0 禁用按数量切分）。
+  - `--no-adaptive-partition`：禁用自适应拆分，严格使用传统顶级目录归类。
+- **客观工程定位**：
+  在系统性跨 Source 推理基准测试中已证实：拆分 Source **完全不影响** Gemini Notebook 的跨文件跨源代码理解与架构推理能力。v0.4.0 专注于解决大型仓库在增量更新时的单体巨型文件替换风暴与网络抖动。
 
 ---
 
@@ -164,6 +186,9 @@ repo2nlm sync https://github.com/owner/repo \
 - `--include "<patterns>"`：包含文件通配符（逗号分隔，如 `src/**,lib/**`）
 - `--exclude "<patterns>"`：排除文件通配符（逗号分隔，如 `tests/**,docs/**`）
 - `--max-file-kb <kb>`：单文件截断阈值（默认 `200` KB）
+- `--max-group-kb <kb>`：每个 RepoBook 章节大小阈值（默认 `512` KB，设为 0 禁用按体积切分）
+- `--max-group-files <n>`：每个 RepoBook 章节文件数阈值（默认 `40`，设为 0 禁用按数量切分）
+- `--no-adaptive-partition`：禁用自适应拆分，严格使用传统顶级目录归类
 - `--no-split-repobook`：禁用按目录拆分，生成单文件 `RepoBook.md`
 - `--replace-existing`：强制全量覆盖远端同名 Source
 

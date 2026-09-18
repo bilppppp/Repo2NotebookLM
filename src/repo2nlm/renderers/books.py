@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from ..config import DEFAULT_MAX_GROUP_FILES, DEFAULT_MAX_GROUP_KB
 from ..types import FileRecord, ImportEdge
 
 
@@ -44,6 +47,113 @@ def _render_tree(paths: list[str]) -> str:
     return "\n".join(lines)
 
 
+def _clean_segment(p: str) -> str:
+    cp = re.sub(r"[^a-zA-Z0-9_-]+", "_", p)
+    cp = re.sub(r"_+", "_", cp)
+    cp = cp.strip("_")
+    return cp or "_"
+
+
+def _path_slug(path_str: str) -> str:
+    parts = [_clean_segment(part) for part in path_str.strip("/").split("/") if part]
+    return "__".join(parts) if parts else "root"
+
+
+def _partition_directory(
+    curr_dir: str,
+    items: list[FileRecord],
+    file_bytes: dict[str, int],
+    max_group_kb: int,
+    max_group_files: int,
+    seen_slugs: dict[str, str],
+) -> list[tuple[str, list[FileRecord]]]:
+    items = sorted(items, key=lambda x: x.path)
+    if not items:
+        return []
+
+    curr_slug = _path_slug(curr_dir)
+    if curr_slug in seen_slugs and seen_slugs[curr_slug] != curr_dir:
+        short_hash = hashlib.sha256(curr_dir.encode("utf-8")).hexdigest()[:6]
+        curr_slug = f"{curr_slug}__{short_hash}"
+    seen_slugs[curr_slug] = curr_dir
+
+    total_bytes = sum(file_bytes[f.path] for f in items) + 150
+    is_oversized = (len(items) > 1) and (
+        (max_group_kb > 0 and total_bytes > max_group_kb * 1024)
+        or (max_group_files > 0 and len(items) > max_group_files)
+    )
+
+    if not is_oversized:
+        return [(curr_slug, items)]
+
+    prefix = "" if curr_dir == "root" else curr_dir + "/"
+    direct_files: list[FileRecord] = []
+    sub_dirs: dict[str, list[FileRecord]] = defaultdict(list)
+
+    for f in items:
+        if curr_dir == "root":
+            rel = f.path
+        else:
+            rel = f.path[len(prefix) :] if f.path.startswith(prefix) else f.path
+
+        if "/" not in rel:
+            direct_files.append(f)
+        else:
+            first_sub = rel.split("/")[0]
+            sub_dirs[first_sub].append(f)
+
+    if not sub_dirs:
+        chunk_files = max_group_files if max_group_files > 0 else len(items)
+        if max_group_kb > 0 and total_bytes > max_group_kb * 1024:
+            min_parts = math.ceil(total_bytes / (max_group_kb * 1024))
+            target = max(1, math.ceil(len(items) / min_parts))
+            chunk_files = min(chunk_files, target)
+        parts = [items[i : i + chunk_files] for i in range(0, len(items), chunk_files)]
+        if len(parts) > 1:
+            return [(f"{curr_slug}__part{idx+1:02d}", part) for idx, part in enumerate(parts)]
+        return [(curr_slug, items)]
+
+    results: list[tuple[str, list[FileRecord]]] = []
+
+    if direct_files:
+        direct_slug = f"{curr_slug}__root"
+        if direct_slug in seen_slugs and seen_slugs[direct_slug] != f"{curr_dir}:root":
+            short_hash = hashlib.sha256(f"{curr_dir}:root".encode("utf-8")).hexdigest()[:6]
+            direct_slug = f"{direct_slug}__{short_hash}"
+        seen_slugs[direct_slug] = f"{curr_dir}:root"
+
+        direct_total = sum(file_bytes[f.path] for f in direct_files) + 150
+        if (len(direct_files) > 1) and (
+            (max_group_kb > 0 and direct_total > max_group_kb * 1024)
+            or (max_group_files > 0 and len(direct_files) > max_group_files)
+        ):
+            chunk_files = max_group_files if max_group_files > 0 else len(direct_files)
+            if max_group_kb > 0 and direct_total > max_group_kb * 1024:
+                min_parts = math.ceil(direct_total / (max_group_kb * 1024))
+                target = max(1, math.ceil(len(direct_files) / min_parts))
+                chunk_files = min(chunk_files, target)
+            parts = [direct_files[i : i + chunk_files] for i in range(0, len(direct_files), chunk_files)]
+            for idx, part in enumerate(parts):
+                results.append((f"{direct_slug}__part{idx+1:02d}", part))
+        else:
+            results.append((direct_slug, direct_files))
+
+    for sub in sorted(sub_dirs.keys()):
+        sub_dir = sub if curr_dir == "root" else f"{curr_dir}/{sub}"
+        results.extend(
+            _partition_directory(
+                sub_dir,
+                sub_dirs[sub],
+                file_bytes,
+                max_group_kb,
+                max_group_files,
+                seen_slugs,
+            )
+        )
+
+    return results
+
+
 def render_repobook(
     out_dir: Path,
     repo_url: str,
@@ -52,6 +162,9 @@ def render_repobook(
     files: list[FileRecord],
     entries: list[dict[str, str]],
     split_repobook: bool = True,
+    max_group_kb: int = DEFAULT_MAX_GROUP_KB,
+    max_group_files: int = DEFAULT_MAX_GROUP_FILES,
+    adaptive_partition: bool = True,
 ) -> list[Path]:
     repodir = out_dir / "RepoBook"
     repodir.mkdir(parents=True, exist_ok=True)
@@ -116,6 +229,11 @@ def render_repobook(
     overview_path = repodir / "00_overview.md"
     overview_path.write_text("\n".join(overview), encoding="utf-8")
 
+    file_bytes = {
+        f.path: len("\n".join(_render_file_section(f)).encode("utf-8")) + 1
+        for f in text_files
+    }
+
     groups: dict[str, list[FileRecord]] = defaultdict(list)
     for f in text_files:
         top = f.path.split("/")[0] if "/" in f.path else "root"
@@ -123,26 +241,65 @@ def render_repobook(
 
     generated = [overview_path]
     idx = 1
+    seen_slugs: dict[str, str] = {}
+
     for group, items in sorted(groups.items()):
         items.sort(key=lambda x: x.path)
-        ext_count = Counter(Path(i.path).suffix.lower() for i in items)
-        summary = ", ".join([f"{k or 'noext'}:{v}" for k, v in ext_count.most_common(6)])
+        group_slug = group.replace("/", "_").replace(".", "_")
 
-        lines = [
-            f"# RepoBook Chapter: {group}",
-            "",
-            f"- Directory: `{group}`",
-            f"- Files: `{len(items)}`",
-            f"- Types: {summary or '(none)'}",
-            "",
-        ]
+        group_total = sum(file_bytes[f.path] for f in items) + 150
+        is_oversized = (
+            adaptive_partition
+            and (len(items) > 1)
+            and (
+                (max_group_kb > 0 and group_total > max_group_kb * 1024)
+                or (max_group_files > 0 and len(items) > max_group_files)
+            )
+        )
 
-        for item in items:
-            lines.extend(_render_file_section(item))
+        if not is_oversized:
+            chapters = [(group_slug, group, items)]
+        else:
+            parts = _partition_directory(
+                group,
+                items,
+                file_bytes,
+                max_group_kb,
+                max_group_files,
+                seen_slugs,
+            )
+            chapters = []
+            for p_slug, p_items in parts:
+                if p_slug.endswith("__root"):
+                    dir_label = f"{p_slug[:-6].replace('__', '/')} (root files)"
+                elif "__part" in p_slug:
+                    base_p, part_idx_s = p_slug.split("__part", 1)
+                    dir_label = f"{base_p.replace('__', '/')} (part {int(part_idx_s)})"
+                else:
+                    dir_label = p_slug.replace("__", "/")
+                chapters.append((p_slug, dir_label, p_items))
 
-        chapter_path = repodir / f"{idx:02d}_{group.replace('/', '_').replace('.', '_')}.md"
-        chapter_path.write_text("\n".join(lines), encoding="utf-8")
-        generated.append(chapter_path)
+        for sub_slug, dir_label, chapter_items in chapters:
+            chapter_items.sort(key=lambda x: x.path)
+            ext_count = Counter(Path(i.path).suffix.lower() for i in chapter_items)
+            summary = ", ".join([f"{k or 'noext'}:{v}" for k, v in ext_count.most_common(6)])
+
+            lines = [
+                f"# RepoBook Chapter: {dir_label}",
+                "",
+                f"- Directory: `{dir_label}`",
+                f"- Files: `{len(chapter_items)}`",
+                f"- Types: {summary or '(none)'}",
+                "",
+            ]
+
+            for item in chapter_items:
+                lines.extend(_render_file_section(item))
+
+            chapter_path = repodir / f"{idx:02d}_{sub_slug}.md"
+            chapter_path.write_text("\n".join(lines), encoding="utf-8")
+            generated.append(chapter_path)
+
         idx += 1
 
     return generated

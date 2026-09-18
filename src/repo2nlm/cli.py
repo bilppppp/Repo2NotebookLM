@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from .config import DEFAULT_EXCLUDES
+from .config import DEFAULT_EXCLUDES, DEFAULT_MAX_GROUP_FILES, DEFAULT_MAX_GROUP_KB
 from .git_ops import get_file_last_commits, prepare_repo_snapshot
 from .graph_builder import build_graph
 from .renderers.books import (
@@ -28,7 +28,20 @@ def _parse_patterns(raw: str | None) -> list[str]:
     return [x.strip() for x in raw.split(",") if x.strip()]
 
 
-def ingest(repo_url: str, out_dir: Path, branch: str | None, commit: str | None, include: str | None, exclude: str | None, max_file_kb: int, split_repobook: bool = True, previous_manifest: Path | None = None) -> dict[str, object]:
+def ingest(
+    repo_url: str,
+    out_dir: Path,
+    branch: str | None,
+    commit: str | None,
+    include: str | None,
+    exclude: str | None,
+    max_file_kb: int,
+    split_repobook: bool = True,
+    previous_manifest: Path | None = None,
+    max_group_kb: int = DEFAULT_MAX_GROUP_KB,
+    max_group_files: int = DEFAULT_MAX_GROUP_FILES,
+    adaptive_partition: bool = True,
+) -> dict[str, object]:
     out_dir.mkdir(parents=True, exist_ok=True)
     default_ex = list(DEFAULT_EXCLUDES)
     extra_ex = _parse_patterns(exclude)
@@ -102,6 +115,9 @@ def ingest(repo_url: str, out_dir: Path, branch: str | None, commit: str | None,
             files,
             entries,
             split_repobook=split_repobook,
+            max_group_kb=max_group_kb,
+            max_group_files=max_group_files,
+            adaptive_partition=adaptive_partition,
         )
         graphbook_file = render_graphbook(out_dir, repo_url, final_branch, final_commit, edges, dirs, entries)
 
@@ -164,6 +180,7 @@ def ingest(repo_url: str, out_dir: Path, branch: str | None, commit: str | None,
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
+    adaptive = (not args.no_adaptive_partition) and (args.max_group_kb > 0 or args.max_group_files > 0)
     stats = ingest(
         repo_url=args.repo_url,
         out_dir=Path(args.out),
@@ -174,6 +191,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         max_file_kb=args.max_file_kb,
         split_repobook=not args.no_split_repobook,
         previous_manifest=None,
+        max_group_kb=args.max_group_kb,
+        max_group_files=args.max_group_files,
+        adaptive_partition=adaptive,
     )
     print(json.dumps(stats, ensure_ascii=False, indent=2))
     return 0
@@ -182,6 +202,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 def cmd_update(args: argparse.Namespace) -> int:
     out_dir = Path(args.out)
     prev_manifest = out_dir / "manifest.json"
+    adaptive = (not args.no_adaptive_partition) and (args.max_group_kb > 0 or args.max_group_files > 0)
     stats = ingest(
         repo_url=args.repo_url,
         out_dir=out_dir,
@@ -192,6 +213,9 @@ def cmd_update(args: argparse.Namespace) -> int:
         max_file_kb=args.max_file_kb,
         split_repobook=not args.no_split_repobook,
         previous_manifest=prev_manifest,
+        max_group_kb=args.max_group_kb,
+        max_group_files=args.max_group_files,
+        adaptive_partition=adaptive,
     )
     print(json.dumps(stats, ensure_ascii=False, indent=2))
     return 0
@@ -212,6 +236,7 @@ def cmd_upload(args: argparse.Namespace) -> int:
 def cmd_sync(args: argparse.Namespace) -> int:
     out_dir = Path(args.out)
     prev_manifest = out_dir / "manifest.json"
+    adaptive = (not args.no_adaptive_partition) and (args.max_group_kb > 0 or args.max_group_files > 0)
     stats = ingest(
         repo_url=args.repo_url,
         out_dir=out_dir,
@@ -222,6 +247,9 @@ def cmd_sync(args: argparse.Namespace) -> int:
         max_file_kb=args.max_file_kb,
         split_repobook=not args.no_split_repobook,
         previous_manifest=prev_manifest if prev_manifest.exists() else None,
+        max_group_kb=args.max_group_kb,
+        max_group_files=args.max_group_files,
+        adaptive_partition=adaptive,
     )
     upload_to_notebooklm(
         [out_dir],
@@ -246,6 +274,9 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--exclude", default=None, help="comma-separated glob patterns")
         p.add_argument("--max-file-kb", type=int, default=200)
         p.add_argument("--no-split-repobook", action="store_true")
+        p.add_argument("--max-group-kb", type=int, default=DEFAULT_MAX_GROUP_KB, help="Max KB per RepoBook chapter before adaptive split (0 to disable)")
+        p.add_argument("--max-group-files", type=int, default=DEFAULT_MAX_GROUP_FILES, help="Max files per RepoBook chapter before adaptive split (0 to disable)")
+        p.add_argument("--no-adaptive-partition", action="store_true", help="Disable adaptive partitioning (use legacy top-level directory grouping)")
 
     p_sync = sub.add_parser("sync", help="snapshot repo, generate books, and incrementally sync to notebooklm")
     add_common(p_sync)

@@ -47,3 +47,6 @@ ENTRY_CANDIDATES = {
     "jsts": ["src/index.ts", "src/main.ts", "server.ts", "app.ts", "src/index.js", "src/main.js"],
     "config": ["pyproject.toml", "setup.cfg", "requirements.txt", "package.json", "tsconfig.json"],
 }
+
+DEFAULT_MAX_GROUP_KB = 512
+DEFAULT_MAX_GROUP_FILES = 40
