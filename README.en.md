@@ -6,7 +6,7 @@
 
 Convert Git repositories into structured knowledge bases tailored for Gemini Notebook (formerly NotebookLM).
 
-> **Current Version**: `v0.4.1`
+> **Current Version**: `v0.4.2`
 
 ---
 
@@ -32,6 +32,8 @@ Repo2NotebookLM bridges **Git Repo → Structured Sources → Gemini Notebook �
 
 ## What's New in v0.4
 
+> **v0.4.2 Patch**: Further stabilized adaptive leaf partition source identities. When a base file bucket requires local refinement due to size growth, sibling base buckets preserve their exact source names and content, preventing remote rename/replacement cascades.
+>
 > **v0.4.1 Patch**:
 > - Tightened repository source integrity and Notebook source quota claims;
 > - Clarified existing `--max-file-kb` head/tail truncation semantics;

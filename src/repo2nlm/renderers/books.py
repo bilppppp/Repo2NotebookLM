@@ -60,16 +60,17 @@ def _path_slug(path_str: str) -> str:
 
 
 def _partition_flat_items(
+    base_slug: str,
     items: list[FileRecord],
     file_bytes: dict[str, int],
     max_group_kb: int,
     max_group_files: int,
-) -> list[list[FileRecord]]:
-    """Partition flat files into stable chunks, preventing boundary cascades.
+) -> list[tuple[str, list[FileRecord]]]:
+    """Partition flat files into stable chunks with isolated namespaces, preventing naming cascades.
 
-    1. Primary grouping by max_group_files ensures stable file-count membership.
+    1. Primary grouping by max_group_files ensures stable file-count base buckets.
     2. Local refinement: If an individual bucket exceeds max_group_kb, it is locally
-       subdivided without disturbing sibling buckets.
+       subdivided under its own namespace (__subNN) without disturbing sibling bucket names.
     """
     if not items:
         return []
@@ -82,26 +83,35 @@ def _partition_flat_items(
     else:
         base_buckets.append(items)
 
-    # Step 2: Deterministic local refinement for oversized buckets
-    final_parts: list[list[FileRecord]] = []
-    for b_items in base_buckets:
+    # Step 2: Deterministic local refinement with isolated namespace
+    final_parts: list[tuple[str, list[FileRecord]]] = []
+    for b_idx, b_items in enumerate(base_buckets):
+        part_name = f"{base_slug}__part{b_idx+1:02d}"
         b_total = sum(file_bytes[f.path] for f in b_items) + 150
-        if (len(b_items) > 1) and (max_group_kb > 0 and b_total > max_group_kb * 1024):
+        needs_local_split = (len(b_items) > 1) and (max_group_kb > 0 and b_total > max_group_kb * 1024)
+        if needs_local_split:
+            sub_parts: list[list[FileRecord]] = []
             cur_part: list[FileRecord] = []
             cur_bytes = 0
             for f in b_items:
                 f_size = file_bytes[f.path]
                 if cur_part and (cur_bytes + f_size > max_group_kb * 1024):
-                    final_parts.append(cur_part)
+                    sub_parts.append(cur_part)
                     cur_part = [f]
                     cur_bytes = f_size
                 else:
                     cur_part.append(f)
                     cur_bytes += f_size
             if cur_part:
-                final_parts.append(cur_part)
+                sub_parts.append(cur_part)
+
+            if len(sub_parts) > 1:
+                for sub_idx, sub_part in enumerate(sub_parts):
+                    final_parts.append((f"{part_name}__sub{sub_idx+1:02d}", sub_part))
+            else:
+                final_parts.append((part_name, sub_parts[0]))
         else:
-            final_parts.append(b_items)
+            final_parts.append((part_name, b_items))
 
     return final_parts
 
@@ -150,10 +160,7 @@ def _partition_directory(
             sub_dirs[first_sub].append(f)
 
     if not sub_dirs:
-        parts = _partition_flat_items(items, file_bytes, max_group_kb, max_group_files)
-        if len(parts) > 1:
-            return [(f"{curr_slug}__part{idx+1:02d}", part) for idx, part in enumerate(parts)]
-        return [(curr_slug, items)]
+        return _partition_flat_items(curr_slug, items, file_bytes, max_group_kb, max_group_files)
 
     results: list[tuple[str, list[FileRecord]]] = []
 
@@ -170,12 +177,8 @@ def _partition_directory(
             or (max_group_files > 0 and len(direct_files) > max_group_files)
         )
         if is_direct_oversized:
-            parts = _partition_flat_items(direct_files, file_bytes, max_group_kb, max_group_files)
-            if len(parts) > 1:
-                for idx, part in enumerate(parts):
-                    results.append((f"{direct_slug}__part{idx+1:02d}", part))
-            else:
-                results.append((direct_slug, direct_files))
+            parts = _partition_flat_items(direct_slug, direct_files, file_bytes, max_group_kb, max_group_files)
+            results.extend(parts)
         else:
             results.append((direct_slug, direct_files))
 
@@ -315,7 +318,11 @@ def render_repobook(
                     dir_label = f"{p_slug[:-6].replace('__', '/')} (root files)"
                 elif "__part" in p_slug:
                     base_p, part_idx_s = p_slug.split("__part", 1)
-                    dir_label = f"{base_p.replace('__', '/')} (part {int(part_idx_s)})"
+                    if "__sub" in part_idx_s:
+                        p_num, sub_num = part_idx_s.split("__sub", 1)
+                        dir_label = f"{base_p.replace('__', '/')} (part {int(p_num)} subpart {int(sub_num)})"
+                    else:
+                        dir_label = f"{base_p.replace('__', '/')} (part {int(part_idx_s)})"
                 else:
                     dir_label = p_slug.replace("__", "/")
                 chapters.append((p_slug, dir_label, p_items))

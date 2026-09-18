@@ -579,5 +579,115 @@ class AdaptivePartitionTests(unittest.TestCase):
             self.assertEqual(all_text.count(f"## {f.path}\n"), 1, f"Expected {f.path} exactly once!")
 
 
+    def test_local_refinement_preserves_sibling_partition_names(self) -> None:
+        """Local refinement of an oversized base bucket must not rename unrelated sibling base buckets."""
+        # 100 files:
+        # B1: files 00..39 (40 files, each 12,500 bytes = 500,000 bytes ~488 KB < 512 KB)
+        # B2: files 40..79 (40 files, each 5,000 bytes = 200,000 bytes < 512 KB)
+        # B3: files 80..99 (20 files, each 5,000 bytes = 100,000 bytes < 512 KB)
+        files_v1 = [
+            make_record(f"src/utils/f_{i:02d}.py", "x" * (12500 if i < 40 else 5000), "111111")
+            for i in range(100)
+        ]
+        out1 = self.out_dir / "refine1"
+        paths1 = render_repobook(
+            out_dir=out1,
+            repo_url="https://github.com/example/refine.git",
+            branch="main",
+            commit="111111",
+            files=files_v1,
+            entries=[],
+            split_repobook=True,
+            max_group_kb=512,
+            max_group_files=40,
+            adaptive_partition=True,
+        )
+        names1 = sorted([p.name for p in paths1 if p.name != "00_overview.md"])
+        h1 = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in paths1 if p.name != "00_overview.md"}
+        self.assertEqual(names1, ["01_src__utils__part01.md", "01_src__utils__part02.md", "01_src__utils__part03.md"])
+
+        # Mutate only f_00.py: add 30,000 bytes -> B1 = 530,000 bytes > 512 * 1024 (524,288 bytes)
+        # This triggers local refinement of B1 without touching B2 or B3
+        files_v2 = [
+            make_record(
+                f"src/utils/f_{i:02d}.py",
+                "x" * (42500 if i == 0 else (12500 if i < 40 else 5000)),
+                "222222" if i == 0 else "111111",
+            )
+            for i in range(100)
+        ]
+        out2 = self.out_dir / "refine2"
+        paths2 = render_repobook(
+            out_dir=out2,
+            repo_url="https://github.com/example/refine.git",
+            branch="main",
+            commit="222222",
+            files=files_v2,
+            entries=[],
+            split_repobook=True,
+            max_group_kb=512,
+            max_group_files=40,
+            adaptive_partition=True,
+        )
+        names2 = sorted([p.name for p in paths2 if p.name != "00_overview.md"])
+        h2 = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in paths2 if p.name != "00_overview.md"}
+
+        # B1 is locally refined into __sub01 and __sub02; B2 and B3 preserve exact names
+        self.assertIn("01_src__utils__part01__sub01.md", names2)
+        self.assertIn("01_src__utils__part01__sub02.md", names2)
+        self.assertIn("01_src__utils__part02.md", names2)
+        self.assertIn("01_src__utils__part03.md", names2)
+
+        # Sibling partitions part02 and part03 are 100% byte identical
+        self.assertEqual(h1["01_src__utils__part02.md"], h2["01_src__utils__part02.md"])
+        self.assertEqual(h1["01_src__utils__part03.md"], h2["01_src__utils__part03.md"])
+
+    def test_local_refinement_remote_churn_receipt(self) -> None:
+        """Remote-churn semantic test: renamed unchanged source count must be exactly zero."""
+        files_v1 = [
+            make_record(f"src/utils/f_{i:02d}.py", "x" * (12500 if i < 40 else 5000), "111111")
+            for i in range(100)
+        ]
+        out1 = self.out_dir / "churn1"
+        paths1 = render_repobook(
+            out_dir=out1, repo_url="https://github.com/example/churn.git",
+            branch="main", commit="111111", files=files_v1, entries=[],
+            split_repobook=True, max_group_kb=512, max_group_files=40, adaptive_partition=True,
+        )
+
+        files_v2 = [
+            make_record(
+                f"src/utils/f_{i:02d}.py",
+                "x" * (42500 if i == 0 else (12500 if i < 40 else 5000)),
+                "222222" if i == 0 else "111111",
+            )
+            for i in range(100)
+        ]
+        out2 = self.out_dir / "churn2"
+        paths2 = render_repobook(
+            out_dir=out2, repo_url="https://github.com/example/churn.git",
+            branch="main", commit="222222", files=files_v2, entries=[],
+            split_repobook=True, max_group_kb=512, max_group_files=40, adaptive_partition=True,
+        )
+
+        def map_files_to_source(out):
+            m = {}
+            for p in (out / "RepoBook").glob("*.md"):
+                if p.name == "00_overview.md": continue
+                text = p.read_text(encoding="utf-8")
+                for line in text.splitlines():
+                    if line.startswith("## "):
+                        m[line[3:].strip()] = p.name
+            return m
+
+        m1 = map_files_to_source(out1)
+        m2 = map_files_to_source(out2)
+
+        # Unmodified sibling files (files 40..99)
+        unmodified_files = [f"src/utils/f_{i:02d}.py" for i in range(40, 100)]
+        renamed_unchanged_sources = [f for f in unmodified_files if m1[f] != m2.get(f)]
+        self.assertEqual(len(renamed_unchanged_sources), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

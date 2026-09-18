@@ -6,7 +6,7 @@
 
 把 Git 仓库转换为适合 Gemini Notebook（原 NotebookLM）长期使用的结构化知识库。
 
-> **当前版本**：`v0.4.1`
+> **当前版本**：`v0.4.2`
 
 ---
 
@@ -32,6 +32,8 @@ Repo2NotebookLM 把 **Git Repo → 结构化 Sources → Gemini Notebook → 增
 
 ## What's New in v0.4
 
+> **v0.4.2 补丁**：进一步稳定自适应叶子分区的 Source identity。当某个固定文件桶因局部体积增长需要进一步拆分时，其它未修改兄弟桶的 Source 名称和内容保持不变，避免局部 refinement 引发远端无效 rename / replacement。
+>
 > **v0.4.1 补丁**：
 > - 收紧 v0.4 文档中的源码完整性与 Notebook Source 配额表述；
 > - 明确 `--max-file-kb` 的既有截断语义；
