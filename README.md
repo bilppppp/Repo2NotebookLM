@@ -6,7 +6,7 @@
 
 把 Git 仓库转换为适合 Gemini Notebook（原 NotebookLM）长期使用的结构化知识库。
 
-> **当前版本**：`v0.4.0`
+> **当前版本**：`v0.4.1`
 
 ---
 
@@ -30,9 +30,15 @@ Repo2NotebookLM 把 **Git Repo → 结构化 Sources → Gemini Notebook → 增
 
 ---
 
-## What's New in v0.4.0
+## What's New in v0.4
 
-- **自适应 RepoBook 细粒度分片 (Adaptive RepoBook Partitioning)**：彻底根除大型真实代码库中的单体 `src/` 爆炸陷阱。在 v0.3 中，仓库顶级目录被合并为一个单一的 RepoBook 章节；当修改 `src/` 深层某个叶子文件时，整个数兆字节的单体文件必须全量重新上传。v0.4.0 引入自适应分片机制：当目录文件数或体积超出设定阈值时，自动沿子目录树层级向下递归细分，并将当前目录直接代码文件精准收敛为独立的 `<dir>__root` 模块，同时支持叶子超大目录保底顺序切分（`__part01`）与单文件超限独立切分。
+> **v0.4.1 补丁**：
+> - 收紧 v0.4 文档中的源码完整性与 Notebook Source 配额表述；
+> - 明确 `--max-file-kb` 的既有截断语义；
+> - 将跨 Source reasoning 结论限定于已测试的 `encode/httpx` 与 `honojs/hono` benchmark；
+> - 修复自适应叶子目录分卷策略，杜绝因单文件改动引发未修改兄弟文件的分区边界级联抖动（Boundary Cascade）。
+
+- **自适应 RepoBook 细粒度分片 (Adaptive RepoBook Partitioning)**：彻底根除大型真实代码库中的单体 `src/` 爆炸陷阱。在 v0.3 中，仓库顶级目录被合并为一个单一的 RepoBook 章节；当修改 `src/` 深层某个叶子文件时，整个数兆字节的单体文件必须全量重新上传。v0.4 引入自适应分片机制：当目录文件数或体积超出设定阈值时，自动沿子目录树层级向下递归细分，并将当前目录直接代码文件精准收敛为独立的 `<dir>__root` 模块，同时支持叶子超大目录保底顺序切分（`__part01`）与单文件超限独立切分。
 - **大型工程变更爆炸半径降低 >80% (Massive Blast Radius Reduction on Large Repos)**：
   在大型开源工程 `honojs/hono`（488 files，~3.5 MB）的标准 mutation benchmark 测试中：
   - **叶子逻辑修改 (M1 Leaf Body)**：远端替换载荷从 v0.3.1 的 **2558 KB (75.2%)** 剧降至 **188 KB (5.5%)**，重传载荷下降 **92.7%**！
@@ -40,15 +46,15 @@ Repo2NotebookLM 把 **Git Repo → 结构化 Sources → Gemini Notebook → 增
   - **Import 拓扑依赖调整 (M3 Topology)**：替换载荷从 **2722 KB** 下降至 **615 KB (18.0%)**，下降 **77.4%**！
   - **新增与删除文件 (M4/M5 Add/Delete)**：替换载荷分别下降 **69.9%** 与 **91.3%**！
 - **中小型仓库零碎片化与 100% 向后兼容 (Zero Over-Fragmentation & Backward Compatibility)**：
-  - 中型工程如 `encode/httpx`（125 files，~1.0 MB）在默认配置下依然稳定保持 8 个 Sources，不超限绝不产生多余切分。
+  - 中型工程如 `encode/httpx`（125 files）在默认配置下依然稳定保持 8 个 Sources，不超限绝不产生多余切分。
   - 提供 `--no-adaptive-partition` 显式开关，可随时无缝退回 v0.3 传统顶级目录分组行为。
-  - 源码 100% 完整性保障：零代码丢弃、零截断、零语义漂移，逐文件 stable permalink 机制与分阶段安全替换（Staged Replacement）及所有权安全守护（Ownership Guard）完全保持不变。
+  - 自适应 RepoBook 分区本身不会引入额外的源码摘要、截断或内容丢弃；文件扫描仍遵循 `--max-file-kb` 配置，超过该阈值的单文件会沿用既有的 head/tail 截断策略。逐文件 permalink、Ownership Guard 与 Failure-Safe Staged Replacement 行为保持不变。
 - **灵活的 CLI 控制阈值**：
   - `--max-group-kb <kb>`：每个 RepoBook 章节最大 KB 阈值（默认 `512` KB，设为 0 禁用按体积切分）。
   - `--max-group-files <n>`：每个 RepoBook 章节最大文件数量阈值（默认 `40` 个文件，设为 0 禁用按数量切分）。
   - `--no-adaptive-partition`：禁用自适应拆分，严格使用传统顶级目录归类。
 - **客观工程定位**：
-  在系统性跨 Source 推理基准测试中已证实：拆分 Source **完全不影响** Gemini Notebook 的跨文件跨源代码理解与架构推理能力。v0.4.0 专注于解决大型仓库在增量更新时的单体巨型文件替换风暴与网络抖动。
+  在 `encode/httpx` 与 `honojs/hono` 的实际 NotebookLM benchmark 中，未观察到自适应模块拆分导致跨 Source 代码推理能力下降。该结果是当前测试范围内的实测结论，并非对所有仓库的普遍保证。v0.4 专注于解决大型仓库在增量更新时的单体巨型文件替换风暴与网络抖动。
 
 ---
 
@@ -253,7 +259,7 @@ bash skills/repo2notebooklm/scripts/cleanup_out.sh ./out-<name> --audit-only
 
 - **依赖非官方客户端**：`notebooklm-py` 为非官方逆向 API 客户端，目前在 `0.8.2` 版本经过完整端到端实测（目标兼容区间：`>=0.8.2,<0.9.0`）。Google Web 端协议或鉴权变动可能影响 CLI 行为。
 - **分阶段替换语义**：Staged Replacement 机制为应用层故障安全设计，非底层分布式原子事务。若网络在重命名瞬间中断，新数据安全留存于远端需人工检查。
-- **上传经验阈值**：Google Gemini Notebook 官方限制为单文件 200 MB / 50 万字，免费版最多 50 个 Sources。repo2nlm 内部采用 4 MB / 2 MB 分块策略，属于防止逆向 API 长连接超时的客户端经验工作区。
+- **上传经验阈值**：以 NotebookLM Free 层级的 50 Sources / notebook 作为保守设计基线（不同产品层级可能提供更高配额）；单源理论上限约为 50 万字。repo2nlm 内部采用 4 MB / 2 MB 分块策略，属于防止逆向 API 长连接超时的客户端经验工作区。
 - **认证调试命令**：
   - `notebooklm login`：交互式获取 Google 认证 Cookie
   - `notebooklm auth check --test`：测试现有 Cookie 与认证有效性

@@ -414,5 +414,170 @@ class AdaptivePartitionTests(unittest.TestCase):
         self.assertNotIn("01_src__part01.md", filenames)
 
 
+    def test_leaf_partition_boundary_cascade_stability(self) -> None:
+        """Leaf fallback stability: body edit in one file must not cascade partition boundaries of sibling files."""
+        # 100 files in flat src/utils/, 10 KB each
+        files_v1 = [
+            make_record(f"src/utils/f_{i:02d}.py", "x" * 10000, commit="111111")
+            for i in range(100)
+        ]
+        out1 = self.out_dir / "v1"
+        render_repobook(
+            out_dir=out1,
+            repo_url="https://github.com/example/cascade.git",
+            branch="main",
+            commit="111111",
+            files=files_v1,
+            entries=[],
+            split_repobook=True,
+            max_group_kb=512,
+            max_group_files=40,
+            adaptive_partition=True,
+        )
+
+        # Mutate only f_00.py body (+60 KB)
+        files_v2 = [
+            make_record(
+                f"src/utils/f_{i:02d}.py",
+                "x" * 70000 if i == 0 else "x" * 10000,
+                commit="222222" if i == 0 else "111111",
+            )
+            for i in range(100)
+        ]
+        out2 = self.out_dir / "v2"
+        render_repobook(
+            out_dir=out2,
+            repo_url="https://github.com/example/cascade.git",
+            branch="main",
+            commit="222222",
+            files=files_v2,
+            entries=[],
+            split_repobook=True,
+            max_group_kb=512,
+            max_group_files=40,
+            adaptive_partition=True,
+        )
+
+        v1_hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (out1 / "RepoBook").glob("*.md")}
+        v2_hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (out2 / "RepoBook").glob("*.md")}
+
+        # Sibling partitions part02 and part03 MUST be byte-identical
+        self.assertEqual(v1_hashes["01_src__utils__part02.md"], v2_hashes["01_src__utils__part02.md"])
+        self.assertEqual(v1_hashes["01_src__utils__part03.md"], v2_hashes["01_src__utils__part03.md"])
+
+    def test_sibling_part_stability_after_body_only_growth(self) -> None:
+        """Unchanged sibling partitions maintain identical files even when a bucket is locally split."""
+        # 60 files: files 00..39 in bucket 1, files 40..59 in bucket 2
+        files = [
+            make_record(f"src/handlers/h_{i:02d}.py", "y" * 5000, commit="aaaaaa")
+            for i in range(60)
+        ]
+        out1 = self.out_dir / "b1"
+        render_repobook(
+            out_dir=out1,
+            repo_url="https://github.com/example/sibling.git",
+            branch="main",
+            commit="aaaaaa",
+            files=files,
+            entries=[],
+            split_repobook=True,
+            max_group_kb=512,
+            max_group_files=40,
+            adaptive_partition=True,
+        )
+        b1_files = {p.name: p.read_text(encoding="utf-8") for p in (out1 / "RepoBook").glob("*.md")}
+        self.assertIn("01_src__handlers__part01.md", b1_files)
+        self.assertIn("01_src__handlers__part02.md", b1_files)
+
+        # Mutate only h_00.py body
+        files_mut = [
+            make_record(
+                f"src/handlers/h_{i:02d}.py",
+                "y" * 20000 if i == 0 else "y" * 5000,
+                commit="bbbbbb" if i == 0 else "aaaaaa",
+            )
+            for i in range(60)
+        ]
+        out2 = self.out_dir / "b2"
+        render_repobook(
+            out_dir=out2,
+            repo_url="https://github.com/example/sibling.git",
+            branch="main",
+            commit="bbbbbb",
+            files=files_mut,
+            entries=[],
+            split_repobook=True,
+            max_group_kb=512,
+            max_group_files=40,
+            adaptive_partition=True,
+        )
+        b2_files = {p.name: p.read_text(encoding="utf-8") for p in (out2 / "RepoBook").glob("*.md")}
+        # Part 2 is 100% byte identical
+        self.assertEqual(
+            hashlib.sha256(b1_files["01_src__handlers__part02.md"].encode("utf-8")).hexdigest(),
+            hashlib.sha256(b2_files["01_src__handlers__part02.md"].encode("utf-8")).hexdigest(),
+        )
+
+    def test_deterministic_membership_across_independent_builds(self) -> None:
+        """Independent builds with flat partitions produce byte-identical files."""
+        files = [
+            make_record(f"src/modules/m_{i:02d}.py", f"val = {i}\n", commit="111111")
+            for i in range(50)
+        ]
+        out1 = self.out_dir / "det1"
+        out2 = self.out_dir / "det2"
+        paths1 = render_repobook(
+            out_dir=out1,
+            repo_url="https://github.com/example/det.git",
+            branch="main",
+            commit="111111",
+            files=files,
+            entries=[],
+            split_repobook=True,
+            max_group_kb=512,
+            max_group_files=20,
+            adaptive_partition=True,
+        )
+        paths2 = render_repobook(
+            out_dir=out2,
+            repo_url="https://github.com/example/det.git",
+            branch="main",
+            commit="111111",
+            files=files,
+            entries=[],
+            split_repobook=True,
+            max_group_kb=512,
+            max_group_files=20,
+            adaptive_partition=True,
+        )
+        h1 = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in paths1}
+        h2 = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in paths2}
+        self.assertEqual(h1, h2)
+
+    def test_exactly_once_after_leaf_fallback(self) -> None:
+        """Every text file is accounted for exactly once across flat leaf fallback partitions."""
+        files = [
+            make_record(f"src/data/d_{i:02d}.py", f"def d{i}(): pass\n", commit="333333")
+            for i in range(35)
+        ]
+        out = self.out_dir / "exactly_once"
+        paths = render_repobook(
+            out_dir=out,
+            repo_url="https://github.com/example/eo.git",
+            branch="main",
+            commit="333333",
+            files=files,
+            entries=[],
+            split_repobook=True,
+            max_group_kb=512,
+            max_group_files=10,
+            adaptive_partition=True,
+        )
+        # Verify exactly once coverage
+        all_text = "".join(p.read_text(encoding="utf-8") for p in paths if p.name != "00_overview.md")
+        for f in files:
+            self.assertEqual(all_text.count(f"## {f.path}\n"), 1, f"Expected {f.path} exactly once!")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -6,7 +6,7 @@
 
 Convert Git repositories into structured knowledge bases tailored for Gemini Notebook (formerly NotebookLM).
 
-> **Current Version**: `v0.4.0`
+> **Current Version**: `v0.4.1`
 
 ---
 
@@ -30,10 +30,16 @@ Repo2NotebookLM bridges **Git Repo → Structured Sources → Gemini Notebook �
 
 ---
 
-## What's New in v0.4.0
+## What's New in v0.4
+
+> **v0.4.1 Patch**:
+> - Tightened repository source integrity and Notebook source quota claims;
+> - Clarified existing `--max-file-kb` head/tail truncation semantics;
+> - Narrowed cross-source reasoning conclusions to tested benchmarks (`encode/httpx` and `honojs/hono`);
+> - Fixed flat leaf fallback partitioning to eliminate partition boundary cascades on small body-only file edits.
 
 - **Adaptive RepoBook Partitioning**:
-  Solves the "monolithic `src/` churn trap" on large repositories. In v0.3, a repository's top-level directory was bundled into a single RepoBook chapter; editing a single leaf file in `src/` forced the entire multi-megabyte `src.md` to be re-uploaded. v0.4.0 introduces an adaptive partitioning algorithm: whenever a directory exceeds size or file count thresholds, it recursively subdivides down the directory hierarchy, isolating direct files into a dedicated `<dir>__root` chapter, with leaf fallback chunking (`__part01`) and single huge file isolation.
+  Solves the "monolithic `src/` churn trap" on large repositories. In v0.3, a repository's top-level directory was bundled into a single RepoBook chapter; editing a single leaf file in `src/` forced the entire multi-megabyte `src.md` to be re-uploaded. v0.4 introduces an adaptive partitioning algorithm: whenever a directory exceeds size or file count thresholds, it recursively subdivides down the directory hierarchy, isolating direct files into a dedicated `<dir>__root` chapter, with leaf fallback chunking (`__part01`) and single huge file isolation.
 
 - **>80% Replacement Blast Radius Reduction on Large Repositories**:
   In standardized mutation benchmarks on `honojs/hono` (488 files, ~3.5 MB):
@@ -43,9 +49,9 @@ Repo2NotebookLM bridges **Git Repo → Structured Sources → Gemini Notebook �
   - **Add & Delete File (M4/M5)**: Replacement payloads drop by **69.9%** and **91.3%** respectively!
 
 - **Zero Over-Fragmentation & 100% Backward Compatibility**:
-  - Medium repositories like `encode/httpx` (125 files, ~1.0 MB) remain at exactly 8 sources under default settings—no unnecessary splitting occurs.
+  - Medium repositories like `encode/httpx` (125 files) remain at exactly 8 sources under default settings—no unnecessary splitting occurs.
   - `--no-adaptive-partition` CLI flag provides full backward compatibility with v0.3 top-level directory grouping.
-  - 100% source integrity: zero code omissions, zero truncation, zero semantic drift. Stable per-file permalinks, failure-safe staged replacement, and ownership guards remain strictly preserved.
+  - Adaptive RepoBook partitioning itself introduces no additional summarization, truncation, or source omission. File scanning still respects `--max-file-kb`; files exceeding that limit continue to use the existing head/tail truncation behavior. Stable per-file permalinks, Ownership Guard, and Failure-Safe Staged Replacement remain unchanged.
 
 - **Configurable CLI Thresholds**:
   - `--max-group-kb <kb>`: Maximum KB per RepoBook chapter before adaptive split (default: `512` KB, 0 to disable).
@@ -53,7 +59,7 @@ Repo2NotebookLM bridges **Git Repo → Structured Sources → Gemini Notebook �
   - `--no-adaptive-partition`: Disable adaptive partitioning and use legacy top-level directory grouping.
 
 - **Clear Engineering Positioning**:
-  Multi-phase cross-source benchmarks demonstrated that splitting code across sources does not degrade Gemini Notebook's inherent cross-file reasoning. v0.4.0 focuses specifically on drastically slashing incremental sync payload sizes and API replacement blast radiuses on large repositories.
+  In NotebookLM benchmarks on `encode/httpx` and `honojs/hono`, adaptive module partitioning showed no observed degradation in cross-source code reasoning. This is an empirical result for the tested repositories, not a universal guarantee. v0.4 focuses specifically on drastically slashing incremental sync payload sizes and API replacement blast radiuses on large repositories.
 
 ---
 
@@ -257,7 +263,7 @@ bash skills/repo2notebooklm/scripts/cleanup_out.sh ./out-<name> --audit-only
 
 - **Unofficial Client**: `notebooklm-py` reverse-engineers Google Gemini Notebook web endpoints. Tested and verified on version `0.8.2` (target range: `>=0.8.2,<0.9.0`). Google backend changes may impact CLI behavior.
 - **Staged Replacement Semantics**: Staged replacement provides application-level safety rather than atomic database transactions.
-- **Upload Thresholds**: Official Gemini Notebook limits are 200 MB / 500,000 words per source and 50 sources for free tiers. Client-side 4 MB / 2 MB chunks are empirical workarounds to prevent timeouts during non-official API streaming.
+- **Upload Thresholds**: Repo2NotebookLM uses the NotebookLM Free-tier 50-source-per-notebook limit as a conservative design baseline (higher product tiers may provide larger source quotas); theoretical limit per source is ~500,000 words. Client-side 4 MB / 2 MB chunks are empirical workarounds to prevent timeouts during non-official API streaming.
 - **Auth Verification Commands**:
   - `notebooklm login`: interactive browser session cookie authentication
   - `notebooklm auth check --test`: test active credentials against Google backend

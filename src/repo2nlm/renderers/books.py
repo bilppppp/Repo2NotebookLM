@@ -59,6 +59,53 @@ def _path_slug(path_str: str) -> str:
     return "__".join(parts) if parts else "root"
 
 
+def _partition_flat_items(
+    items: list[FileRecord],
+    file_bytes: dict[str, int],
+    max_group_kb: int,
+    max_group_files: int,
+) -> list[list[FileRecord]]:
+    """Partition flat files into stable chunks, preventing boundary cascades.
+
+    1. Primary grouping by max_group_files ensures stable file-count membership.
+    2. Local refinement: If an individual bucket exceeds max_group_kb, it is locally
+       subdivided without disturbing sibling buckets.
+    """
+    if not items:
+        return []
+
+    # Step 1: Stable file-count buckets
+    base_buckets: list[list[FileRecord]] = []
+    if max_group_files > 0:
+        for i in range(0, len(items), max_group_files):
+            base_buckets.append(items[i : i + max_group_files])
+    else:
+        base_buckets.append(items)
+
+    # Step 2: Deterministic local refinement for oversized buckets
+    final_parts: list[list[FileRecord]] = []
+    for b_items in base_buckets:
+        b_total = sum(file_bytes[f.path] for f in b_items) + 150
+        if (len(b_items) > 1) and (max_group_kb > 0 and b_total > max_group_kb * 1024):
+            cur_part: list[FileRecord] = []
+            cur_bytes = 0
+            for f in b_items:
+                f_size = file_bytes[f.path]
+                if cur_part and (cur_bytes + f_size > max_group_kb * 1024):
+                    final_parts.append(cur_part)
+                    cur_part = [f]
+                    cur_bytes = f_size
+                else:
+                    cur_part.append(f)
+                    cur_bytes += f_size
+            if cur_part:
+                final_parts.append(cur_part)
+        else:
+            final_parts.append(b_items)
+
+    return final_parts
+
+
 def _partition_directory(
     curr_dir: str,
     items: list[FileRecord],
@@ -103,12 +150,7 @@ def _partition_directory(
             sub_dirs[first_sub].append(f)
 
     if not sub_dirs:
-        chunk_files = max_group_files if max_group_files > 0 else len(items)
-        if max_group_kb > 0 and total_bytes > max_group_kb * 1024:
-            min_parts = math.ceil(total_bytes / (max_group_kb * 1024))
-            target = max(1, math.ceil(len(items) / min_parts))
-            chunk_files = min(chunk_files, target)
-        parts = [items[i : i + chunk_files] for i in range(0, len(items), chunk_files)]
+        parts = _partition_flat_items(items, file_bytes, max_group_kb, max_group_files)
         if len(parts) > 1:
             return [(f"{curr_slug}__part{idx+1:02d}", part) for idx, part in enumerate(parts)]
         return [(curr_slug, items)]
@@ -123,18 +165,17 @@ def _partition_directory(
         seen_slugs[direct_slug] = f"{curr_dir}:root"
 
         direct_total = sum(file_bytes[f.path] for f in direct_files) + 150
-        if (len(direct_files) > 1) and (
+        is_direct_oversized = (len(direct_files) > 1) and (
             (max_group_kb > 0 and direct_total > max_group_kb * 1024)
             or (max_group_files > 0 and len(direct_files) > max_group_files)
-        ):
-            chunk_files = max_group_files if max_group_files > 0 else len(direct_files)
-            if max_group_kb > 0 and direct_total > max_group_kb * 1024:
-                min_parts = math.ceil(direct_total / (max_group_kb * 1024))
-                target = max(1, math.ceil(len(direct_files) / min_parts))
-                chunk_files = min(chunk_files, target)
-            parts = [direct_files[i : i + chunk_files] for i in range(0, len(direct_files), chunk_files)]
-            for idx, part in enumerate(parts):
-                results.append((f"{direct_slug}__part{idx+1:02d}", part))
+        )
+        if is_direct_oversized:
+            parts = _partition_flat_items(direct_files, file_bytes, max_group_kb, max_group_files)
+            if len(parts) > 1:
+                for idx, part in enumerate(parts):
+                    results.append((f"{direct_slug}__part{idx+1:02d}", part))
+            else:
+                results.append((direct_slug, direct_files))
         else:
             results.append((direct_slug, direct_files))
 
