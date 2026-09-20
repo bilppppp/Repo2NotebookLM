@@ -40,15 +40,15 @@ Repo2NotebookLM 把 **Git Repo → 结构化 Sources → Gemini Notebook → 增
 > - 将跨 Source reasoning 结论限定于已测试的 `encode/httpx` 与 `honojs/hono` benchmark；
 > - 修复自适应叶子目录分卷策略，杜绝因单文件改动引发未修改兄弟文件的分区边界级联抖动（Boundary Cascade）。
 
-- **自适应 RepoBook 细粒度分片 (Adaptive RepoBook Partitioning)**：彻底根除大型真实代码库中的单体 `src/` 爆炸陷阱。在 v0.3 中，仓库顶级目录被合并为一个单一的 RepoBook 章节；当修改 `src/` 深层某个叶子文件时，整个数兆字节的单体文件必须全量重新上传。v0.4 引入自适应分片机制：当目录文件数或体积超出设定阈值时，自动沿子目录树层级向下递归细分，并将当前目录直接代码文件精准收敛为独立的 `<dir>__root` 模块，同时支持叶子超大目录保底顺序切分（`__part01`）与单文件超限独立切分。
-- **大型工程变更爆炸半径降低 >80% (Massive Blast Radius Reduction on Large Repos)**：
+- **自适应 RepoBook 细粒度分片 (Adaptive RepoBook Partitioning)**：有效缓解大型真实代码库中的单体 `src/` 爆炸陷阱。在 v0.3 中，仓库顶级目录被合并为一个单一的 RepoBook 章节；当修改 `src/` 深层某个叶子文件时，整个数兆字节的单体文件必须全量重新上传。v0.4 引入自适应分片机制：当目录文件数或体积超出设定阈值时，自动沿子目录树层级向下递归细分，并将当前目录直接代码文件精准收敛为独立的 `<dir>__root` 模块，同时支持叶子超大目录保底顺序切分（`__part01`）与单文件超限独立切分。
+- **大型工程变更爆炸半径显著收缩（最高降低 92.7%）(Massive Blast Radius Reduction on Large Repos)**：
   在大型开源工程 `honojs/hono`（488 files，~3.5 MB）的标准 mutation benchmark 测试中：
   - **叶子逻辑修改 (M1 Leaf Body)**：远端替换载荷从 v0.3.1 的 **2558 KB (75.2%)** 剧降至 **188 KB (5.5%)**，重传载荷下降 **92.7%**！
   - **核心逻辑修改 (M2 Core Body)**：替换载荷从 **2558 KB (75.2%)** 下降至 **451 KB (13.2%)**，下降 **82.4%**！
   - **Import 拓扑依赖调整 (M3 Topology)**：替换载荷从 **2722 KB** 下降至 **615 KB (18.0%)**，下降 **77.4%**！
   - **新增与删除文件 (M4/M5 Add/Delete)**：替换载荷分别下降 **69.9%** 与 **91.3%**！
-- **中小型仓库零碎片化与 100% 向后兼容 (Zero Over-Fragmentation & Backward Compatibility)**：
-  - 中型工程如 `encode/httpx`（125 files）在默认配置下依然稳定保持 8 个 Sources，不超限绝不产生多余切分。
+- **中小型仓库避免过度碎片化与向后兼容设计 (Zero Over-Fragmentation & Backward Compatibility)**：
+  - 中型工程如 `encode/httpx`（125 files）在默认配置下保持精简的目录级切分，未超限子目录绝不产生多余切分。
   - 提供 `--no-adaptive-partition` 显式开关，可随时无缝退回 v0.3 传统顶级目录分组行为。
   - 自适应 RepoBook 分区本身不会引入额外的源码摘要、截断或内容丢弃；文件扫描仍遵循 `--max-file-kb` 配置，超过该阈值的单文件会沿用既有的 head/tail 截断策略。逐文件 permalink、Ownership Guard 与 Failure-Safe Staged Replacement 行为保持不变。
 - **灵活的 CLI 控制阈值**：
@@ -63,7 +63,7 @@ Repo2NotebookLM 把 **Git Repo → 结构化 Sources → Gemini Notebook → 增
 ## What's New in v0.3
 
 - **大幅降低元数据驱动的源抖动 (Reduce Metadata-Induced Source Churn)**：普通单文件代码修改（body-only change）不再因为全局 HEAD Commit SHA 变化导致无关 Sources 被全量重传。在真实 Gemini Notebook E2E 测试中，远端变更替换量从 v0.2 的 **5/5 (100%)** 显著下降至 **3/5 (60%)**。
-- **逐文件稳定 GitHub 永久链接 (Stable Per-File Permalinks)**：代码段落的 GitHub 永久链接不再全量绑定全局 HEAD，而是精准锚定该文件最后一次产生实质修改的 Commit SHA。未修改文件的 Permalink 永久保持稳定，确保对应的 RepoBook 章节哈希不变（byte-stable），同时严格保证链接所指代码与章节正文的绝对一致。
+- **逐文件稳定 GitHub 永久链接 (Stable Per-File Permalinks)**：代码段落的 GitHub 永久链接不再全量绑定全局 HEAD，而是精准锚定该文件最后一次产生实质修改的 Commit SHA。未修改文件的 Permalink 永久保持稳定，确保对应的 RepoBook 章节哈希不变（byte-stable），同时保持链接所指代码版本与章节正文高度一致。
 - **拓扑幂等的 GraphBook 架构图 (Stable GraphBook)**：`GraphBook.md` 不再携带易变的快照 Commit 元数据。当项目模块导入关系、目录职责和代码拓扑结构未发生变化时，`GraphBook.md` 保持逐字节完全一致（byte-identical），消除无意义重传；依赖图变更时仍精准触发更新。
 - **v0.2 → v0.3 Manifest 平滑迁移与回填 (v0.2 → v0.3 Migration)**：自动兼容未记录单文件 Commit 的 v0.2 旧版 `manifest.json`。增量更新时自动从 Git 历史中高效回填每个文件的最后修改 Commit 并持久化升级，在浅克隆（shallow clone）或历史受限场景下具备安全的 fallback 保障。
 
@@ -168,7 +168,7 @@ Gemini Notebook
 - **`RepoBook/`**：代码与文档正文，按目录组织成适合 Notebook 学习的章节文件，每份文件附带精确的 GitHub commit 永久链接。
 - **`GraphBook.md`**：项目依赖图与架构拓扑，包含目录职责推断、核心 Import Hub 统计与调用明细。
 - **`ChangeBook.md`**：记录最近一次实际版本变更（新增、修改、删除及 commit 对比）；在无代码变更的 no-op 同步中保持文件 Hash 绝对不变。
-- **`manifest.json`**：本地文件扫描索引与 SHA256 快照，为增量比对提供事实来源。
+- **`manifest.json`**：本地文件扫描索引与 SHA256 快照，记录当前扫描结果的增量状态快照。
 - **`graph.json`**：结构化的依赖图与目录推断数据。
 - **`stats.json`**：扫描统计与最新提交元数据。
 - **`upload_map.json`**：增量同步审计凭据，记录远端 Source ID、状态与本地文件对应关系（`missing_titles` 必须为空）。
@@ -261,7 +261,11 @@ bash skills/repo2notebooklm/scripts/cleanup_out.sh ./out-<name> --audit-only
 
 - **依赖非官方客户端**：`notebooklm-py` 为非官方逆向 API 客户端，目前在 `0.8.2` 版本经过完整端到端实测（目标兼容区间：`>=0.8.2,<0.9.0`）。Google Web 端协议或鉴权变动可能影响 CLI 行为。
 - **分阶段替换语义**：Staged Replacement 机制为应用层故障安全设计，非底层分布式原子事务。若网络在重命名瞬间中断，新数据安全留存于远端需人工检查。
-- **上传经验阈值**：以 NotebookLM Free 层级的 50 Sources / notebook 作为保守设计基线（不同产品层级可能提供更高配额）；单源理论上限约为 50 万字。repo2nlm 内部采用 4 MB / 2 MB 分块策略，属于防止逆向 API 长连接超时的客户端经验工作区。
+- **Source 配额与无主动压缩**：NotebookLM 各层级账户存在 Source 数量上限（例如 Free 层级保守限额约为 50 Sources/notebook，部分高级或企业层级提供更高配额）。`v0.4.2` **不会主动按配额压缩 Sources**；在默认自适应切分下，大型代码库（如包含大量中间件或子模块的工程）生成的 Sources 数量可能超出账户限制，需要依托更高层级配额、手动指定子目录范围（`--include`）或自定义分组阈值。
+- **超大单文件截断语义**：默认 `--max-file-kb=200`。对于超出该大小的文本文件，当前采用 head/tail 保留策略（头部与尾部各取一半，中间插入 `...TRUNCATED...` 标记），超限文件的**中部内容不会进入 RepoBook**。单文件截断上限可通过 `--max-file-kb` 调整。
+- **特殊 Git 对象支持边界**：当前扫描器面向常规工作区代码文件，尚未对符号链接（symlink）、子模块（submodule gitlink）、Git LFS pointer 等特殊 Git 对象建立完整的模型与双向还原。
+- **编码与解码边界**：文本检测与解码主要针对 UTF-8。非 UTF-8 编码的源文件在解码时可能发生字符替换（`errors="replace"`）或解码失真。
+- **无配额感知自适应打包 (No Source-Budget-Aware Packing)**：`v0.4.2` 的分区基于静态目录树规则与 `--max-group-kb` / `--max-group-files` 阈值，尚不支持传入目标配额（如自动打包至恰好 50 个 Sources 以内）的动态规划调度。
 - **认证调试命令**：
   - `notebooklm login`：交互式获取 Google 认证 Cookie
   - `notebooklm auth check --test`：测试现有 Cookie 与认证有效性

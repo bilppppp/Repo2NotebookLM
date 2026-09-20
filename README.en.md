@@ -41,17 +41,17 @@ Repo2NotebookLM bridges **Git Repo → Structured Sources → Gemini Notebook �
 > - Fixed flat leaf fallback partitioning to eliminate partition boundary cascades on small body-only file edits.
 
 - **Adaptive RepoBook Partitioning**:
-  Solves the "monolithic `src/` churn trap" on large repositories. In v0.3, a repository's top-level directory was bundled into a single RepoBook chapter; editing a single leaf file in `src/` forced the entire multi-megabyte `src.md` to be re-uploaded. v0.4 introduces an adaptive partitioning algorithm: whenever a directory exceeds size or file count thresholds, it recursively subdivides down the directory hierarchy, isolating direct files into a dedicated `<dir>__root` chapter, with leaf fallback chunking (`__part01`) and single huge file isolation.
+  Mitigates the "monolithic `src/` churn trap" on large repositories. In v0.3, a repository's top-level directory was bundled into a single RepoBook chapter; editing a single leaf file in `src/` forced the entire multi-megabyte `src.md` to be re-uploaded. v0.4 introduces an adaptive partitioning algorithm: whenever a directory exceeds size or file count thresholds, it recursively subdivides down the directory hierarchy, isolating direct files into a dedicated `<dir>__root` chapter, with leaf fallback chunking (`__part01`) and single huge file isolation.
 
-- **>80% Replacement Blast Radius Reduction on Large Repositories**:
+- **Significant Replacement Blast Radius Reduction on Large Repositories (Up to 92.7%)**:
   In standardized mutation benchmarks on `honojs/hono` (488 files, ~3.5 MB):
   - **Leaf Body Modification (M1)**: Remote replacement payload drops from **2558 KB (75.2%)** in v0.3.1 to **188 KB (5.5%)**—a **92.7% reduction**!
   - **Core Body Modification (M2)**: Replacement payload drops from **2558 KB (75.2%)** to **451 KB (13.2%)**—an **82.4% reduction**!
   - **Import Topology Change (M3)**: Replacement payload drops from **2722 KB** to **615 KB (18.0%)**—a **77.4% reduction**!
   - **Add & Delete File (M4/M5)**: Replacement payloads drop by **69.9%** and **91.3%** respectively!
 
-- **Zero Over-Fragmentation & 100% Backward Compatibility**:
-  - Medium repositories like `encode/httpx` (125 files) remain at exactly 8 sources under default settings—no unnecessary splitting occurs.
+- **Zero Over-Fragmentation & Backward Compatibility Design**:
+  - Medium repositories like `encode/httpx` (125 files) maintain clean directory-level grouping under default settings—no unnecessary fragmentation occurs for subdirectories within limits.
   - `--no-adaptive-partition` CLI flag provides full backward compatibility with v0.3 top-level directory grouping.
   - Adaptive RepoBook partitioning itself introduces no additional summarization, truncation, or source omission. File scanning still respects `--max-file-kb`; files exceeding that limit continue to use the existing head/tail truncation behavior. Stable per-file permalinks, Ownership Guard, and Failure-Safe Staged Replacement remain unchanged.
 
@@ -68,7 +68,7 @@ Repo2NotebookLM bridges **Git Repo → Structured Sources → Gemini Notebook �
 ## What's New in v0.3
 
 - **Reduce Metadata-Induced Source Churn**: Standard body-only code modifications no longer trigger unnecessary remote source re-uploads due to global HEAD commit shifts. In real Gemini Notebook E2E testing, remote replacements for single-file edits drop from **5/5 (100%)** in v0.2 down to **3/5 (60%)**.
-- **Stable Per-File Permalinks**: GitHub permalinks in RepoBook chapters no longer anchor indiscriminately to the latest repository HEAD. Unchanged files pin strictly to their last content-changing commit SHA, ensuring chapter byte-stability without sacrificing permalink content correctness.
+- **Stable Per-File Permalinks**: GitHub permalinks in RepoBook chapters no longer anchor indiscriminately to the latest repository HEAD. Unchanged files pin strictly to their last content-changing commit SHA, ensuring chapter byte-stability while keeping permalinks aligned with the intended code version.
 - **Stable GraphBook**: `GraphBook.md` omits volatile snapshot commit metadata. When import relationships, directory roles, and file topologies remain unchanged, `GraphBook.md` stays byte-identical, eliminating churn while still updating reliably when dependencies actually change.
 - **v0.2 → v0.3 Manifest Migration**: Seamlessly upgrades legacy v0.2 `manifest.json` files lacking per-file commit records. Automatically backfills each file's last-touch commit from Git history into the upgraded manifest, with safe fallbacks for shallow clones.
 
@@ -173,7 +173,7 @@ Gemini Notebook
 - **`RepoBook/`**: Code and documentation grouped into clean chapter files, each with commit-pinned GitHub permalinks.
 - **`GraphBook.md`**: Architectural topology, directory responsibility heuristics, core import hubs, and dependency traces.
 - **`ChangeBook.md`**: Recent version changes (added, modified, deleted files and commit diffs); never rewritten on no-op syncs.
-- **`manifest.json`**: Local scanned file index and SHA256 hashes providing the ground truth for incremental diffing.
+- **`manifest.json`**: Local scanned file index and SHA256 hashes recording an incremental state snapshot of current scan results.
 - **`graph.json`**: Structured dependency graph and directory role metadata.
 - **`stats.json`**: Scanning metrics and commit metadata.
 - **`upload_map.json`**: Audit artifact reconciling local sources with remote notebook IDs and statuses (`missing_titles` must be empty).
@@ -264,8 +264,12 @@ bash skills/repo2notebooklm/scripts/cleanup_out.sh ./out-<name> --audit-only
 ## Compatibility & Limitations
 
 - **Unofficial Client**: `notebooklm-py` reverse-engineers Google Gemini Notebook web endpoints. Tested and verified on version `0.8.2` (target range: `>=0.8.2,<0.9.0`). Google backend changes may impact CLI behavior.
-- **Staged Replacement Semantics**: Staged replacement provides application-level safety rather than atomic database transactions.
-- **Upload Thresholds**: Repo2NotebookLM uses the NotebookLM Free-tier 50-source-per-notebook limit as a conservative design baseline (higher product tiers may provide larger source quotas); theoretical limit per source is ~500,000 words. Client-side 4 MB / 2 MB chunks are empirical workarounds to prevent timeouts during non-official API streaming.
+- **Staged Replacement Semantics**: Staged replacement provides application-level safety rather than atomic database transactions. If network breaks during the final rename step, staged sources remain on the remote notebook for manual recovery.
+- **Source Quotas & No Active Budget Compression**: NotebookLM accounts enforce source limits per notebook (e.g. a conservative 50 sources for Free-tier accounts, with higher quotas on Pro/Workspace accounts). `v0.4.2` **does not actively compress or merge sources to fit account quotas**; large repositories (e.g., projects with numerous middleware modules) may produce more sources than an account's quota allows under default settings, requiring higher tier quotas, narrower scope (`--include`), or custom grouping thresholds.
+- **Large File Truncation Semantics**: Defaults to `--max-file-kb=200`. For text files exceeding this limit, repo2nlm applies a head/tail preservation policy (keeping the first half and last half, separated by `...TRUNCATED...`), meaning **middle content in oversized files will not enter RepoBook**. This threshold can be adjusted via `--max-file-kb`.
+- **Special Git Objects**: The scanner operates on standard working tree files and does not yet fully model special Git objects such as symbolic links (symlinks), submodule gitlinks, or Git LFS pointer assets.
+- **Character Encoding**: Text detection and decoding prioritize UTF-8. Non-UTF-8 files may encounter character replacement (`errors="replace"`) or decoding distortion.
+- **No Source-Budget-Aware Packing**: Partitioning in `v0.4.2` is governed by directory hierarchy and static thresholds (`--max-group-kb`, `--max-group-files`). It does not dynamically pack files to target an exact source budget constraint (e.g., fitting within 50 sources).
 - **Auth Verification Commands**:
   - `notebooklm login`: interactive browser session cookie authentication
   - `notebooklm auth check --test`: test active credentials against Google backend

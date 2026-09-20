@@ -35,7 +35,8 @@ Use this skill to run the local `repo2nlm` tool end-to-end.
 1. Ingest repository
 
 ```bash
-./repo2nlm ingest <repo_url> --out ./out-<name> --max-file-kb 200
+./repo2nlm ingest <repo_url> --out ./out-<name> --max-file-kb 200 \
+  --max-group-kb 512 --max-group-files 40
 ```
 
 2. Incremental update (optional)
@@ -88,7 +89,7 @@ bash skills/repo2notebooklm/scripts/cleanup_out.sh ./out-<name> --audit-only
 
 - Verified with `notebooklm-py==0.8.2` (Target compatibility range: `>=0.8.2,<0.9.0`).
 - Subcommands used: `source list`, `source add`, `source wait`, `source delete`, `source rename`, `create`, `list`.
-- `ingest` supports `--branch`, `--commit`, `--include`, `--exclude`, `--max-file-kb`
+- `ingest` supports `--branch`, `--commit`, `--include`, `--exclude`, `--max-file-kb`, `--max-group-kb`, `--max-group-files`, `--no-adaptive-partition`, `--no-split-repobook`
 - `update` compares with existing `manifest.json` and reports changed/deleted files
 - `ChangeBook.md` reflects "最近一次实际仓库变更"; in no-op syncs with no changes, it is not rewritten.
 - `sync` uses Ownership Guard (only deletes managed IDs) and Staged Replacement (uploads staging source before deleting old version).
@@ -107,7 +108,10 @@ bash skills/repo2notebooklm/scripts/cleanup_out.sh ./out-<name> --audit-only
   - `items[].split`: whether file was split
   - `items[].remote_sources[]`: remote `id/status/type/created_at`
   - acceptance rule: `missing_titles` must be empty
-- For a merged notebook, the strict correctness rule is:
-  - union all `items[].uploaded_titles` across the relevant `upload_map.json` files
-  - compare that union with `notebooklm source list -n <notebook_id> --json`
-  - acceptance rule: no missing titles, no extra titles, all remote sources are `ready`
+- For a merged notebook, the upload acceptance rule is:
+  - union all `items[].uploaded_titles` across the relevant `upload_map.json` files as expected managed titles
+  - compare against `notebooklm source list -n <notebook_id> --json`
+  - acceptance rule:
+    - expected managed titles must have no missing entries (`missing_titles` is empty)
+    - all expected managed titles must be `ready`
+    - unmanaged/manual sources (user notes, reference PDFs) are permitted and must not be deleted (protected by Ownership Guard)
