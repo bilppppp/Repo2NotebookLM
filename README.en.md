@@ -6,7 +6,7 @@
 
 Convert Git repositories into structured knowledge bases tailored for Gemini Notebook (formerly NotebookLM).
 
-> **Current Version**: `v0.4.3`
+> **Current Version**: `v0.4.4`
 
 ---
 
@@ -32,6 +32,8 @@ Repo2NotebookLM bridges **Git Repo → Structured Sources → Gemini Notebook �
 
 ## What's New in v0.4
 
+> **v0.4.4 Patch**: Fixed a v0.4.3 regression where the `upload` subcommand crashed because partition-specific CLI fields were not defined for that subcommand.
+>
 > **v0.4.3 Patch**:
 > - Existing outputs preserve their previous partition strategy by default (legacy remains legacy, adaptive remains adaptive), preventing full-source deletion/re-upload churn on upgrade;
 > - Fresh repositories still default to adaptive partitioning;

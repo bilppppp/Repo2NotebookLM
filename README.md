@@ -6,7 +6,7 @@
 
 把 Git 仓库转换为适合 Gemini Notebook（原 NotebookLM）长期使用的结构化知识库。
 
-> **当前版本**：`v0.4.3`
+> **当前版本**：`v0.4.4`
 
 ---
 
@@ -32,6 +32,9 @@ Repo2NotebookLM 把 **Git Repo → 结构化 Sources → Gemini Notebook → 增
 
 ## What's New in v0.4
 
+> **v0.4.4 补丁**：
+> - 修复了由于分区特定 CLI 字段未在该子命令中定义，导致 `upload` 子命令崩溃的 v0.4.3 回归问题 (Fixed a v0.4.3 regression where the `upload` subcommand crashed because partition-specific CLI fields were not defined for that subcommand.)。
+>
 > **v0.4.3 补丁**：
 > - 已有 Notebook 输出默认保持既有分区策略（v0.3 legacy 保持 legacy，v0.4.2 adaptive 保持 adaptive），杜绝因升级工具引发全量删除/重传 churn；
 > - 新建仓库/无历史 manifest 默认仍使用自适应细粒度分片；
