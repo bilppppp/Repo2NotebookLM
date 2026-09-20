@@ -7,8 +7,12 @@ import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from typing import Any
+
 from ..config import DEFAULT_MAX_GROUP_FILES, DEFAULT_MAX_GROUP_KB
 from ..types import FileRecord, ImportEdge
+
+_PART_SLUG_RE = re.compile(r"^(?P<base>.+)__part(?P<part>\d+)(?:__sub(?P<sub>\d+))?$")
 
 
 def get_github_permalink(repo_url: str, commit: str, file_path: str) -> str | None:
@@ -314,15 +318,17 @@ def render_repobook(
             )
             chapters = []
             for p_slug, p_items in parts:
+                m = _PART_SLUG_RE.fullmatch(p_slug)
                 if p_slug.endswith("__root"):
                     dir_label = f"{p_slug[:-6].replace('__', '/')} (root files)"
-                elif "__part" in p_slug:
-                    base_p, part_idx_s = p_slug.split("__part", 1)
-                    if "__sub" in part_idx_s:
-                        p_num, sub_num = part_idx_s.split("__sub", 1)
-                        dir_label = f"{base_p.replace('__', '/')} (part {int(p_num)} subpart {int(sub_num)})"
+                elif m:
+                    base_p = m.group("base")
+                    p_num = int(m.group("part"))
+                    sub_num = m.group("sub")
+                    if sub_num is not None:
+                        dir_label = f"{base_p.replace('__', '/')} (part {p_num} subpart {int(sub_num)})"
                     else:
-                        dir_label = f"{base_p.replace('__', '/')} (part {int(part_idx_s)})"
+                        dir_label = f"{base_p.replace('__', '/')} (part {p_num})"
                 else:
                     dir_label = p_slug.replace("__", "/")
                 chapters.append((p_slug, dir_label, p_items))
@@ -405,7 +411,16 @@ def render_graphbook(out_dir: Path, repo_url: str, branch: str, commit: str, edg
     return graphbook_path
 
 
-def write_manifest(out_dir: Path, repo_url: str, branch: str, commit: str, files: list[FileRecord], exclude: list[str], max_file_kb: int) -> Path:
+def write_manifest(
+    out_dir: Path,
+    repo_url: str,
+    branch: str,
+    commit: str,
+    files: list[FileRecord],
+    exclude: list[str],
+    max_file_kb: int,
+    partition: dict[str, Any] | None = None,
+) -> Path:
     manifest = {
         "repo": {"url": repo_url, "default_branch": branch, "commit": commit},
         "files": [
@@ -420,10 +435,111 @@ def write_manifest(out_dir: Path, repo_url: str, branch: str, commit: str, files
             for f in files
         ],
         "filters": {"exclude": exclude, "max_file_kb": max_file_kb},
+        "partition": partition if partition is not None else {
+            "adaptive": True,
+            "max_group_kb": DEFAULT_MAX_GROUP_KB,
+            "max_group_files": DEFAULT_MAX_GROUP_FILES,
+            "strategy_version": 2,
+        },
     }
     p = out_dir / "manifest.json"
     p.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return p
+
+
+def derive_legacy_repobook_filenames(files: list[dict[str, Any] | FileRecord]) -> set[str]:
+    """Deterministically derive expected legacy RepoBook filenames from a file list."""
+    text_paths: list[str] = []
+    for f in files:
+        if isinstance(f, dict):
+            if f.get("text", True):
+                text_paths.append(str(f.get("path", "")))
+        else:
+            if getattr(f, "text", True):
+                text_paths.append(str(getattr(f, "path", "")))
+
+    groups: set[str] = set()
+    for p in text_paths:
+        if not p:
+            continue
+        top = p.split("/")[0] if "/" in p else "root"
+        groups.add(top)
+
+    expected = {"00_overview.md"}
+    for idx, group in enumerate(sorted(groups), start=1):
+        slug = group.replace("/", "_").replace(".", "_")
+        expected.add(f"{idx:02d}_{slug}.md")
+    return expected
+
+
+def resolve_partition_config(
+    out_dir: Path,
+    previous_manifest_path: Path | None = None,
+    adaptive_partition: bool | None = None,
+    max_group_kb: int | None = None,
+    max_group_files: int | None = None,
+    previous_manifest_data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Resolve partition strategy and parameters following v0.4.3 rules:
+    - Fresh repo / no previous manifest: defaults to adaptive (512 KB, 40 files).
+    - Existing manifest with partition metadata: inherits existing partition configuration.
+    - Existing manifest without partition metadata (v0.3 / v0.4.2 legacy):
+        conservatively identifies legacy if existing RepoBook/*.md files exactly match
+        deterministic legacy top-level grouping derivation; otherwise preserves adaptive.
+    - Explicit CLI parameters override defaults/inherited values and update manifest.
+    """
+    manifest_p = previous_manifest_path
+    if manifest_p is None:
+        candidate = out_dir / "manifest.json"
+        if candidate.exists():
+            manifest_p = candidate
+
+    prev_data = previous_manifest_data
+    if prev_data is None and manifest_p and manifest_p.exists():
+        try:
+            prev_data = json.loads(manifest_p.read_text(encoding="utf-8"))
+        except Exception:
+            prev_data = None
+
+    if prev_data is not None and isinstance(prev_data, dict):
+        if "partition" in prev_data and isinstance(prev_data["partition"], dict):
+            part_meta = prev_data["partition"]
+            base_adaptive = bool(part_meta.get("adaptive", True))
+            base_max_kb = int(part_meta.get("max_group_kb", DEFAULT_MAX_GROUP_KB))
+            base_max_files = int(part_meta.get("max_group_files", DEFAULT_MAX_GROUP_FILES))
+        else:
+            repodir = out_dir / "RepoBook"
+            if not repodir.is_dir() and manifest_p:
+                cand_repo = manifest_p.parent / "RepoBook"
+                if cand_repo.is_dir():
+                    repodir = cand_repo
+            existing_mds = {p.name for p in repodir.glob("*.md")} if repodir.is_dir() else set()
+            prev_files = prev_data.get("files", []) if isinstance(prev_data, dict) else []
+            expected_legacy = derive_legacy_repobook_filenames(prev_files)
+            if existing_mds and existing_mds == expected_legacy:
+                base_adaptive = False
+            else:
+                base_adaptive = True
+            base_max_kb = DEFAULT_MAX_GROUP_KB
+            base_max_files = DEFAULT_MAX_GROUP_FILES
+    else:
+        base_adaptive = True
+        base_max_kb = DEFAULT_MAX_GROUP_KB
+        base_max_files = DEFAULT_MAX_GROUP_FILES
+
+    resolved_adaptive = adaptive_partition if adaptive_partition is not None else base_adaptive
+    resolved_max_kb = max_group_kb if max_group_kb is not None else base_max_kb
+    resolved_max_files = max_group_files if max_group_files is not None else base_max_files
+
+    if resolved_max_kb <= 0 and resolved_max_files <= 0:
+        resolved_adaptive = False
+
+    return {
+        "adaptive": resolved_adaptive,
+        "max_group_kb": resolved_max_kb,
+        "max_group_files": resolved_max_files,
+        "strategy_version": 2,
+    }
 
 
 def write_graph_json(out_dir: Path, edges: list[ImportEdge], dirs: list[dict[str, object]]) -> Path:

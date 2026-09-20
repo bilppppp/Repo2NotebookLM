@@ -6,7 +6,7 @@
 
 把 Git 仓库转换为适合 Gemini Notebook（原 NotebookLM）长期使用的结构化知识库。
 
-> **当前版本**：`v0.4.2`
+> **当前版本**：`v0.4.3`
 
 ---
 
@@ -32,6 +32,12 @@ Repo2NotebookLM 把 **Git Repo → 结构化 Sources → Gemini Notebook → 增
 
 ## What's New in v0.4
 
+> **v0.4.3 补丁**：
+> - 已有 Notebook 输出默认保持既有分区策略（v0.3 legacy 保持 legacy，v0.4.2 adaptive 保持 adaptive），杜绝因升级工具引发全量删除/重传 churn；
+> - 新建仓库/无历史 manifest 默认仍使用自适应细粒度分片；
+> - 增加 `--adaptive-partition` 显式迁移/启用选项，与 `--no-adaptive-partition` 组成互斥三态控制；
+> - 修复包含 `__part` 字符串的真实路径（如 `partial`、`counterpart`、`department` 等）被误判为分卷序号的问题。
+>
 > **v0.4.2 补丁**：进一步稳定自适应叶子分区的 Source identity。当某个固定文件桶因局部体积增长需要进一步拆分时，其它未修改兄弟桶的 Source 名称和内容保持不变，避免局部 refinement 引发远端无效 rename / replacement。
 >
 > **v0.4.1 补丁**：
@@ -54,7 +60,8 @@ Repo2NotebookLM 把 **Git Repo → 结构化 Sources → Gemini Notebook → 增
 - **灵活的 CLI 控制阈值**：
   - `--max-group-kb <kb>`：每个 RepoBook 章节最大 KB 阈值（默认 `512` KB，设为 0 禁用按体积切分）。
   - `--max-group-files <n>`：每个 RepoBook 章节最大文件数量阈值（默认 `40` 个文件，设为 0 禁用按数量切分）。
-  - `--no-adaptive-partition`：禁用自适应拆分，严格使用传统顶级目录归类。
+  - `--adaptive-partition`：显式启用或迁移至自适应分区（新建仓库默认开启）。
+  - `--no-adaptive-partition`：禁用自适应拆分，严格使用传统顶级目录归类（已有 legacy 输出默认保持）。
 - **客观工程定位**：
   在 `encode/httpx` 与 `honojs/hono` 的实际 NotebookLM benchmark 中，未观察到自适应模块拆分导致跨 Source 代码推理能力下降。该结果是当前测试范围内的实测结论，并非对所有仓库的普遍保证。v0.4 专注于解决大型仓库在增量更新时的单体巨型文件替换风暴与网络抖动。
 

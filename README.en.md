@@ -6,7 +6,7 @@
 
 Convert Git repositories into structured knowledge bases tailored for Gemini Notebook (formerly NotebookLM).
 
-> **Current Version**: `v0.4.2`
+> **Current Version**: `v0.4.3`
 
 ---
 
@@ -32,6 +32,12 @@ Repo2NotebookLM bridges **Git Repo → Structured Sources → Gemini Notebook �
 
 ## What's New in v0.4
 
+> **v0.4.3 Patch**:
+> - Existing outputs preserve their previous partition strategy by default (legacy remains legacy, adaptive remains adaptive), preventing full-source deletion/re-upload churn on upgrade;
+> - Fresh repositories still default to adaptive partitioning;
+> - Added `--adaptive-partition` CLI flag for explicit migration/opt-in, forming a mutually exclusive tri-state with `--no-adaptive-partition`;
+> - Fixed a path parsing bug where paths containing `__part` substrings (e.g. `partial`, `counterpart`, `department`) were incorrectly identified as partition numbers.
+>
 > **v0.4.2 Patch**: Further stabilized adaptive leaf partition source identities. When a base file bucket requires local refinement due to size growth, sibling base buckets preserve their exact source names and content, preventing remote rename/replacement cascades.
 >
 > **v0.4.1 Patch**:
@@ -47,7 +53,7 @@ Repo2NotebookLM bridges **Git Repo → Structured Sources → Gemini Notebook �
   In standardized mutation benchmarks on `honojs/hono` (488 files, ~3.5 MB):
   - **Leaf Body Modification (M1)**: Remote replacement payload drops from **2558 KB (75.2%)** in v0.3.1 to **188 KB (5.5%)**—a **92.7% reduction**!
   - **Core Body Modification (M2)**: Replacement payload drops from **2558 KB (75.2%)** to **451 KB (13.2%)**—an **82.4% reduction**!
-  - **Import Topology Change (M3)**: Replacement payload drops from **2722 KB** to **615 KB (18.0%)**—a **77.4% reduction**!
+  - **Import Topology Change (M3)**: Replacement payload drops from **2722 KB** to **615 KB (18.0%)**—an **77.4% reduction**!
   - **Add & Delete File (M4/M5)**: Replacement payloads drop by **69.9%** and **91.3%** respectively!
 
 - **Zero Over-Fragmentation & Backward Compatibility Design**:
@@ -58,7 +64,8 @@ Repo2NotebookLM bridges **Git Repo → Structured Sources → Gemini Notebook �
 - **Configurable CLI Thresholds**:
   - `--max-group-kb <kb>`: Maximum KB per RepoBook chapter before adaptive split (default: `512` KB, 0 to disable).
   - `--max-group-files <n>`: Maximum files per RepoBook chapter before adaptive split (default: `40` files, 0 to disable).
-  - `--no-adaptive-partition`: Disable adaptive partitioning and use legacy top-level directory grouping.
+  - `--adaptive-partition`: Explicitly enable/migrate to adaptive partitioning (default for fresh repositories).
+  - `--no-adaptive-partition`: Disable adaptive partitioning and use legacy top-level directory grouping (default for existing legacy outputs).
 
 - **Clear Engineering Positioning**:
   In NotebookLM benchmarks on `encode/httpx` and `honojs/hono`, adaptive module partitioning showed no observed degradation in cross-source code reasoning. This is an empirical result for the tested repositories, not a universal guarantee. v0.4 focuses specifically on drastically slashing incremental sync payload sizes and API replacement blast radiuses on large repositories.

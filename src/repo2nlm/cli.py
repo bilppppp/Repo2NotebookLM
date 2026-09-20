@@ -14,6 +14,7 @@ from .renderers.books import (
     render_changebook,
     render_graphbook,
     render_repobook,
+    resolve_partition_config,
     write_graph_json,
     write_manifest,
     write_stats,
@@ -38,9 +39,9 @@ def ingest(
     max_file_kb: int,
     split_repobook: bool = True,
     previous_manifest: Path | None = None,
-    max_group_kb: int = DEFAULT_MAX_GROUP_KB,
-    max_group_files: int = DEFAULT_MAX_GROUP_FILES,
-    adaptive_partition: bool = True,
+    max_group_kb: int | None = None,
+    max_group_files: int | None = None,
+    adaptive_partition: bool | None = None,
 ) -> dict[str, object]:
     out_dir.mkdir(parents=True, exist_ok=True)
     default_ex = list(DEFAULT_EXCLUDES)
@@ -50,6 +51,7 @@ def ingest(
     # 1. Snapshot previous manifest state before any file generation or clone
     prev: dict[str, dict[str, Any]] = {}
     prev_commit: str | None = None
+    prev_data: dict[str, Any] | None = None
     has_previous = False
     if previous_manifest and previous_manifest.exists():
         try:
@@ -67,7 +69,20 @@ def ingest(
         except Exception:
             prev = {}
             prev_commit = None
+            prev_data = None
             has_previous = False
+
+    partition_cfg = resolve_partition_config(
+        out_dir=out_dir,
+        previous_manifest_path=previous_manifest,
+        adaptive_partition=adaptive_partition,
+        max_group_kb=max_group_kb,
+        max_group_files=max_group_files,
+        previous_manifest_data=prev_data,
+    )
+    resolved_adaptive = partition_cfg["adaptive"]
+    resolved_max_group_kb = partition_cfg["max_group_kb"]
+    resolved_max_group_files = partition_cfg["max_group_files"]
 
     with tempfile.TemporaryDirectory(prefix="repo2nlm_") as td:
         repo_dir = Path(td) / "repo"
@@ -115,9 +130,9 @@ def ingest(
             files,
             entries,
             split_repobook=split_repobook,
-            max_group_kb=max_group_kb,
-            max_group_files=max_group_files,
-            adaptive_partition=adaptive_partition,
+            max_group_kb=resolved_max_group_kb,
+            max_group_files=resolved_max_group_files,
+            adaptive_partition=resolved_adaptive,
         )
         graphbook_file = render_graphbook(out_dir, repo_url, final_branch, final_commit, edges, dirs, entries)
 
@@ -147,7 +162,16 @@ def ingest(
             if changebook_path.exists():
                 changebook_file = changebook_path
 
-        manifest_file = write_manifest(out_dir, repo_url, final_branch, final_commit, files, ex_patterns, max_file_kb)
+        manifest_file = write_manifest(
+            out_dir,
+            repo_url,
+            final_branch,
+            final_commit,
+            files,
+            ex_patterns,
+            max_file_kb,
+            partition=partition_cfg,
+        )
         graph_file = write_graph_json(out_dir, edges, dirs)
 
         stats = {
@@ -166,6 +190,7 @@ def ingest(
             },
             "changed_files": sorted(added + modified) if has_previous else sorted(curr.keys()),
             "deleted_files": deleted,
+            "partition": partition_cfg,
             "outputs": {
                 "repobook_files": [str(x) for x in repobook_files],
                 "graphbook": str(graphbook_file),
@@ -180,7 +205,6 @@ def ingest(
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
-    adaptive = (not args.no_adaptive_partition) and (args.max_group_kb > 0 or args.max_group_files > 0)
     stats = ingest(
         repo_url=args.repo_url,
         out_dir=Path(args.out),
@@ -193,7 +217,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         previous_manifest=None,
         max_group_kb=args.max_group_kb,
         max_group_files=args.max_group_files,
-        adaptive_partition=adaptive,
+        adaptive_partition=args.adaptive_partition,
     )
     print(json.dumps(stats, ensure_ascii=False, indent=2))
     return 0
@@ -202,7 +226,6 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 def cmd_update(args: argparse.Namespace) -> int:
     out_dir = Path(args.out)
     prev_manifest = out_dir / "manifest.json"
-    adaptive = (not args.no_adaptive_partition) and (args.max_group_kb > 0 or args.max_group_files > 0)
     stats = ingest(
         repo_url=args.repo_url,
         out_dir=out_dir,
@@ -215,7 +238,7 @@ def cmd_update(args: argparse.Namespace) -> int:
         previous_manifest=prev_manifest,
         max_group_kb=args.max_group_kb,
         max_group_files=args.max_group_files,
-        adaptive_partition=adaptive,
+        adaptive_partition=args.adaptive_partition,
     )
     print(json.dumps(stats, ensure_ascii=False, indent=2))
     return 0
@@ -236,7 +259,6 @@ def cmd_upload(args: argparse.Namespace) -> int:
 def cmd_sync(args: argparse.Namespace) -> int:
     out_dir = Path(args.out)
     prev_manifest = out_dir / "manifest.json"
-    adaptive = (not args.no_adaptive_partition) and (args.max_group_kb > 0 or args.max_group_files > 0)
     stats = ingest(
         repo_url=args.repo_url,
         out_dir=out_dir,
@@ -249,7 +271,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
         previous_manifest=prev_manifest if prev_manifest.exists() else None,
         max_group_kb=args.max_group_kb,
         max_group_files=args.max_group_files,
-        adaptive_partition=adaptive,
+        adaptive_partition=args.adaptive_partition,
     )
     upload_to_notebooklm(
         [out_dir],
@@ -274,9 +296,33 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--exclude", default=None, help="comma-separated glob patterns")
         p.add_argument("--max-file-kb", type=int, default=200)
         p.add_argument("--no-split-repobook", action="store_true")
-        p.add_argument("--max-group-kb", type=int, default=DEFAULT_MAX_GROUP_KB, help="Max KB per RepoBook chapter before adaptive split (0 to disable)")
-        p.add_argument("--max-group-files", type=int, default=DEFAULT_MAX_GROUP_FILES, help="Max files per RepoBook chapter before adaptive split (0 to disable)")
-        p.add_argument("--no-adaptive-partition", action="store_true", help="Disable adaptive partitioning (use legacy top-level directory grouping)")
+        p.add_argument(
+            "--max-group-kb",
+            type=int,
+            default=None,
+            help=f"Max KB per RepoBook chapter before adaptive split (default: {DEFAULT_MAX_GROUP_KB}, 0 to disable)",
+        )
+        p.add_argument(
+            "--max-group-files",
+            type=int,
+            default=None,
+            help=f"Max files per RepoBook chapter before adaptive split (default: {DEFAULT_MAX_GROUP_FILES}, 0 to disable)",
+        )
+        part_group = p.add_mutually_exclusive_group()
+        part_group.add_argument(
+            "--adaptive-partition",
+            dest="adaptive_partition",
+            action="store_true",
+            default=None,
+            help="Explicitly enable/migrate to adaptive RepoBook partitioning",
+        )
+        part_group.add_argument(
+            "--no-adaptive-partition",
+            dest="adaptive_partition",
+            action="store_false",
+            default=None,
+            help="Explicitly disable adaptive partitioning (use legacy top-level directory grouping)",
+        )
 
     p_sync = sub.add_parser("sync", help="snapshot repo, generate books, and incrementally sync to notebooklm")
     add_common(p_sync)
@@ -314,6 +360,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    if not hasattr(args, "no_adaptive_partition"):
+        args.no_adaptive_partition = args.adaptive_partition is False
     return args.func(args)
 
 
